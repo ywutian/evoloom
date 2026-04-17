@@ -5,10 +5,12 @@ import asyncio
 import uuid
 import time
 from pathlib import Path
+from pyexpat.errors import messages
 from typing import Callable, Awaitable, Any
 
 from agents.mcp_client import McpManager
 from agents.prompt import build_system_prompt, build_plan_mode_prompt
+from agents.session import save_session
 from agents.tools import ToolDef, tool_definitions
 
 import openai
@@ -29,6 +31,16 @@ MODEL_CONTEXT = {
 
 def _get_context_windows(model:str)->int:
     return MODEL_CONTEXT.get(model, 200000)
+
+
+#多层级压缩常数
+SNIP_THRESHOLD = 0.60
+SNIP_PLACEHOLDER = "[Content snipped - re-read if needed]"
+SNIPPABLE_TOOLS = {"read_file", "grep_search", "list_files", "run_shell"}
+MICROCOMPACT_IDLE_S = 5 * 60  # 5 minutes
+
+KEEP_RECENT_RESULTS = 3
+
 
 class Agent:
     def __init__(self,
@@ -317,17 +329,289 @@ class Agent:
             return {"exceeded": True, "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})"}
         return {"exceeded": False}
 
+    #压缩会话
+    async def compact(self)->None:
+        await self._compact_conversation()
+
+    # 会话
+    #恢复会话信息
+    def restore_session(self, data:dict)->None:
+        if data.get("anthropicMessages"):
+            self._anthropic_messages = data["anthropicMessages"]
+        if data.get("openaiMessages"):
+            self._openai_messages = data["openaiMessages"]
+        print_info(f"Session restored ({self._get_message_count()} messages).")
+
+    def _get_message_count(self) -> int:
+        return len(self._openai_messages) if self.use_openai else len(self._anthropic_messages)
+
+    def _auto_save(self) -> None:
+        try:
+            save_session(self.session_id, {
+                "metadata": {
+                    "id": self.session_id,
+                    "model": self.model,
+                    "cwd": str(Path.cwd()),
+                    "startTime": self.session_start_time,
+                    "messageCount": self._get_message_count(),
+                },
+                "anthropicMessages": self._anthropic_messages if not self.use_openai else None,
+                "openaiMessages": self._openai_messages if self.use_openai else None,
+            })
+        except Exception:
+            pass
+
+    #自动压缩
+    async def _check_and_compact(self)->None:
+        if self.last_input_tokens>self.effective_windos*0.85:
+            print_info("Context window filling up, compacting conversation...")
+            await self._compact_conversation()
+
+    async def _compact_conversation(self)->None:
+        if self.use_openai:
+            await self._compact_openai()
+        else:
+            await self._compact_anthropic()
+        print_info("Conversation compacted.")
+
+    async def _compact_anthropic(self)->None:
+        if len (self._anthropic_messages)<4:
+            return
+
+        last_user_msg = self._anthropic_messages[-1]
+        summary_resp = await self._anthropic_client.messages.create(
+            model=self.model,
+            max_tokens=2048,
+            system ="You are a conversation summarizer. Be concise but preserve important details.",
+            messages=[
+                *self._anthropic_messages[:-1],
+                {"role":"user",
+                 "content":"Summarize the conversation so far in a concise paragraph, preserving key decisions, file paths, and context needed to continue the work."
+                }
+            ],
+        )
+        summary_text = summary_resp.content[0].text if summary_resp.content and  summary_resp.content[0].type == "text" else "No summary available."
+        self._anthropic_messages=[
+            {"role":"user","content":f"[Previous conversation summary]\n{summary_text}"},
+            {"role": "assistant", "content": "Understood. I have the context from our previous conversation. How can I continue helping?"},
+        ]
+        if last_user_msg.get("role") == "user":
+            self._anthropic_messages.append(last_user_msg)
+        self.last_input_tokens=0
+
+    async def _compact_openai(self)->None:
+        if len (self._openai_messages)<4:
+            return
+        system_msg = self._openai_messages[0]
+        last_user_msg = self._openai_messages[-1]
+        summary_resp = await self._openai_client.completions.create(
+            model=self.model,
+            messages =[
+                {"role": "system", "content": "You are a conversation summarizer. Be concise but preserve important details."},
+                *self._openai_messages[1:-1],
+                {"role": "user","content": "Summarize the conversation so far in a concise paragraph, preserving key decisions, file paths, and context needed to continue the work."},
+
+            ],
+        )
+        summary_text = summary_resp.choices[0].text if summary_resp.choices and summary_resp.choices[0].type == "text" else ""
+        self._openai_messages=[
+            system_msg,
+            {"role": "user", "content": f"[Previous conversation summary]\n{summary_text}"},
+            {"role": "assistant","content": "Understood. I have the context from our previous conversation. How can I continue helping?"},
+        ]
+        if last_user_msg.get("role") == "user":
+            self._openai_messages.append(last_user_msg)
+        self.last_input_token_count=0
+
+    #多层级压缩流水线
+    def _run_compression_pipeline(self)->None:
+        if self.use_openai:
+            self._budget_tool_results_openai()
+            self._snip_stale_results_openai()
+            self._microcompact_openai()
+        else:
+            self._budget_tool_results_anthropic()
+            self._snip_stale_results_anthropic()
+            self._microcompact_anthropic()
+
+    #第一层级压缩，预算压缩
+    def _budget_tool_results_anthropic(self)->None:
+        #计算利用率：utilization = 已用Token / 有效窗口大小。
+        utilization = self.last_input_token_count / self.effective_windos if self.effective_windos else 0
+        #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
+        if utilization < 0.5:
+            return
+        #动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
+        # 警戒状态（50%-70%）：如果利用率中等，只允许保留 30000 个字符。
+        budget = 15000 if utilization > 0.7 else 30000
+
+        for msg in self._anthropic_messages:
+
+            #只处理 role 为 "user" 的消息。在工具调用流程中，工具的执行结果通常是以“用户”的身份反馈给模型的。
+
+            if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+                continue
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and len(block["content"]) > budget:
+                    #计算保留长度 (keep)：keep = (budget - 80) // 2 这里预留了约 80 个字符的空间给中间的提示语，剩下的长度平分给开头和结尾。
+                    keep = (budget - 80) // 2
+                    #重组新内容 = 开头部分 + 提示语 + 结尾部分
+                    block["content"] = block["content"][:keep] + f"\n\n[... budgeted: {len(block['content']) - keep * 2} chars truncated ...]\n\n" + block["content"][-keep:]
+
+    def _budget_tool_results_openai(self)->None:
+        #计算利用率：utilization = 已用Token / 有效窗口大小。
+        utilization = self.last_input_token_count / self.effective_windos if self.effective_windos else 0
+        #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
+        if utilization < 0.5:
+            return
+        #动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
+        # 警戒状态（50%-70%）：如果利用率中等，只允许保留 30000 个字符。
+        budget = 15000 if utilization > 0.7 else 30000
+
+        for msg in self._openai_messages:
+            if msg.get("role") == "tool" and isinstance(msg.get("content"), str) and len(msg["content"]) > budget:
+                keep = (budget - 80) // 2
+                msg["content"] = msg["content"][:keep] + f"\n\n[... budgeted: {len(msg['content']) - keep * 2} chars truncated ...]\n\n" + msg["content"][-keep:]
 
 
+    #第二级策略：修剪过期的工具执行结果
+    def _snip_stale_results_anthropic(self) -> None:
+        utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
+        if utilization < SNIP_THRESHOLD:
+            return
+        results = []
+        for mindex,  msg in enumerate(self._anthropic_messages):
+            if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+                continue
 
+            for bindex, block in enumerate(msg["content"]):
+                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and block["content"] != SNIP_PLACEHOLDER:
+                    tool_use_id = block.get("tool_use_id")
+                    tool_info = self._find_tool_use_by_id(tool_use_id)
+                    if tool_info and tool_info["name"] in SNIPPABLE_TOOLS:
+                        results.append({"mIndex": mindex, "bindex": bindex, "name": tool_info["name"], "file_path": tool_info.get("input", {}).get("file_path")})
 
+        if len(results) <= KEEP_RECENT_RESULTS:
+            return
 
+        to_snip =  set()
+        seen_files: dict[str, list[int]] = {}
 
+        for i, r in enumerate(results):
+            if r["name"] == "read_file" and r.get("file_path"):
+                seen_files.setdefault(r["file_path"], []).append(i)
+        #如果一个文件被读取了多次，只保留最后一次读取的结果，把前面几次读取的内容全部标记为“修剪”（Snip）。
+        for indices in seen_files.values():
+            if len (indices) >1 :
+                for j in indices[:-1]:
+                    to_snip.add (j)
 
+        snip_before = len(results) - KEEP_RECENT_RESULTS
+        for i in range (snip_before):
+            to_snip.add(i)
 
+        for idx in to_snip:
+            r = results[idx]
+            self._anthropic_messages[r["mindex"]]["content"][r["bindex"]]["content"] = SNIP_PLACEHOLDER
 
+    def _snip_stale_results_openai(self) -> None:
+        utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
+        if utilization < SNIP_THRESHOLD:
+            return
+        tool_msgs = []
+        for i, msg in enumerate(self._openai_messages):
+            if msg.get("role") == "tool" and isinstance(msg.get("content"), str) and msg["content"] != SNIP_PLACEHOLDER:
+                tool_msgs.append(i)
+        if len(tool_msgs) <= KEEP_RECENT_RESULTS:
+            return
+        snip_count = len(tool_msgs) - KEEP_RECENT_RESULTS
+        for i in range(snip_count):
+            self._openai_messages[tool_msgs[i]]["content"] = SNIP_PLACEHOLDER
 
+    #微压缩
 
+    #基于“时间”的上下文瘦身策略，
+    #如果已经很久没说话了，说明之前的工具执行结果你已经看完了，那就把它们清理掉，腾出空间
 
+    def _microcompact_anthropic(self) -> None:
+        if not self.last_api_call_time or (time.time() - self.last_api_call_time) < MICROCOMPACT_IDLE_S:
+            return
+
+        all_results = []
+        for mindex, msg in enumerate(self._anthropic_messages):
+            if msg.get("role")!="user" or not isinstance(msg.get("content"), list):
+                continue
+            for bindex, block in enumerate(msg["content"]):
+                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and block["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]"):
+                    all_results.append((mindex, bindex))
+
+        clear_count = len(all_results) - KEEP_RECENT_RESULTS
+        for i in range(max(0, clear_count)):
+            mi, bi = all_results[i]
+            self._anthropic_messages[mi]["content"][bi]["content"] = "[Old result cleared]"
+
+    def _microcompact_openai(self) -> None:
+        if not self.last_api_call_time or (time.time() - self.last_api_call_time) < MICROCOMPACT_IDLE_S:
+            return
+        tool_msgs = []
+        for i, msg in enumerate(self._openai_messages):
+            if msg.get("role") == "tool" and isinstance(msg.get("content"), str) and msg["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]"):
+                tool_msgs.append(i)
+        clear_count = len(tool_msgs) - KEEP_RECENT_RESULTS
+        for i in range(max(0, clear_count)):
+            self._openai_messages[tool_msgs[i]]["content"] = "[Old result cleared]"
+
+    def _find_tool_use_by_id(self, tool_use_id: int) -> dict | None:
+        for msg in self._anthropic_messages:
+            if msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
+                continue
+
+            for block in msg["content"]:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id") == tool_use_id:
+                    return {"name": block["name"], "input": block.get("input", {})}
+
+    #大结果持久化
+    #如果工具返回的结果太大（超过 30KB），不要硬塞进上下文里，而是把它存成一个临时文件。
+    # 然后在对话里只留一个‘文件路径’和‘内容预览’。如果模型后面还需要看完整内容，它可以再次调用工具去读取这个文件
+
+    def _persist_large_result(self, tool_name: str, result: str) -> str:
+        THRESHOLD = 30 * 1024  # 30 KB
+        #转换成字节
+        if (len (result.encode())) <= THRESHOLD:
+            return result
+
+        d = Path.home() / ".bear-code" / "tool-results"
+        d.mkdir(parents=True, exist_ok=True)
+        filename = f"{int(time.time() * 1000)}-{tool_name}.txt"
+        filepath = d / filename
+        filepath.write_text(result, encoding="utf-8")
+
+        lines = result.split("\n")
+        preview = "\n".join(lines[:200])
+        size_kb = len(result.encode()) / 1024
+
+        return (
+            f"[Result too large ({size_kb:.1f} KB, {len(lines)} lines). "
+            f"Full output saved to {filepath}. "
+            f"You can use read_file to see the full result.]\n\n"
+            f"Preview (first 200 lines):\n{preview}"
+        )
+
+    #执行工具入口
+
+    async def _execute_tool_call(self, name: str, inp: dict) -> str:
+        if name in ("enter_plan_mode", "exit_plan_mode"):
+            return await self._execute_plan_mode_tool(name)
+        if name == "agent":
+            return await self._execute_agent_tool(inp)
+        if name == "skill":
+            return await self._execute_skill_tool(inp)
+            # Route MCP tool calls to the MCP manager
+        if self._mcp_manager.is_mcp_tool(name):
+            return await self._mcp_manager.call_tool(name, inp)
+        return await execute_tool(name, inp, self._read_file_state)
+
+    #
+    async def _execute_skill_tool(self, inp: dict) -> str:
 
 
