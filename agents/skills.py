@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from agents.utils.frontmatter import parse_frontmatter
+from .frontmatter import parse_frontmatter
 
 
 @dataclass
@@ -57,11 +57,13 @@ def discover_skills() -> list[SkillDefinition]:
     skills: dict[str,SkillDefinition] = {}
     user_dir = Path.home() / ".bear" / "skills"
     _load_skills_from_dir(user_dir, "user", skills)
+    project_dir = Path.cwd() / ".bear" / "skills"
+    _load_skills_from_dir(project_dir, "project", skills, overwrite=False)
 
     _cached_skills = list(skills.values())
     return _cached_skills
 
-def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDefinition]) -> None:
+def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDefinition], overwrite: bool = True) -> None:
     if not base_dir.is_dir():
         return
     for entry in base_dir.iterdir():
@@ -72,6 +74,8 @@ def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDe
             continue
         skill = _parse_skill_file(skill_file, source, str(entry))
         if skill:
+            if not overwrite and skill.name in skills:
+                continue
             skills[skill.name] = skill
 
 def _parse_skill_file(file_path: Path, source: str, skill_dir: str) -> SkillDefinition:
@@ -111,9 +115,39 @@ def _parse_skill_file(file_path: Path, source: str, skill_dir: str) -> SkillDefi
         return None
 
 
+def build_skill_descriptions() -> str:
+    skills = discover_skills()
+    if not skills:
+        return ""
+
+    lines = ["# Available Skills", ""]
+    invocable = [s for s in skills if s.user_invocable]
+    auto_only = [s for s in skills if not s.user_invocable]
+
+    if invocable:
+        lines.append("User-invocable skills (user types /<name> to invoke):")
+        for s in invocable:
+            lines.append(f"- **/{s.name}**: {s.description}")
+            if s.when_to_use:
+                lines.append(f"  When to use: {s.when_to_use}")
+        lines.append("")
+
+    if auto_only:
+        lines.append("Auto-invocable skills:")
+        lines.append("When the user's request matches a skill's When to use, call the `skill` tool with that skill name before continuing. Do not ask the user to invoke it manually.")
+        for s in auto_only:
+            lines.append(f"- **{s.name}**: {s.description}")
+            if s.when_to_use:
+                lines.append(f"  When to use: {s.when_to_use}")
+        lines.append("")
+
+    lines.append("To invoke a skill programmatically, use the `skill` tool with the skill name and optional arguments.")
+    return "\n".join(lines)
 
 
-
+def reset_skill_cache() -> None:
+    global _cached_skills
+    _cached_skills = None
 
 
 

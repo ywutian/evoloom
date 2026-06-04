@@ -2,24 +2,72 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 import time
 from pathlib import Path
-from pyexpat.errors import messages
 from typing import Callable, Awaitable, Any
 
 from agents.mcp_client import McpManager
 from agents.memory import MemoryPrefetch, start_memory_prefetch, format_memories_for_injection
-from agents.prompt import build_system_prompt, build_plan_mode_prompt
+from agents.prompt import build_system_prompt
 from agents.session import save_session
-from agents.tools import ToolDef, tool_definitions, execute_tool, CONCURRENCY_SAFE_TOOLS, check_permission
+from agents.subagent import get_sub_agent_config
+from agents.tools import ToolDef, tool_definitions, execute_tool, CONCURRENCY_SAFE_TOOLS, check_permission, \
+    get_active_tool_definitions
 
 import openai
 import anthropic
 
 from agents.ui import print_info, print_divider, print_assistant_text, print_sub_agent_start, print_sub_agent_end, \
-    start_spinner, stop_spinner, print_cost, print_tool_call, print_tool_result
+    start_spinner, stop_spinner, print_cost, print_tool_call, print_tool_result, print_confirmation, print_retry
+
+
+# 指数退避重试
+
+
+def _is_retryable(error: Exception) -> bool:
+    status = getattr(error, "status_code", None) or getattr(error, "status", None)
+    if status in (429, 503, 529):
+        return True
+    msg = str(error)
+    if "overloaded" in msg or "ECONNRESET" in msg or "ETIMEDOUT" in msg:
+        return True
+    return False
+
+
+def _safe_utf8_text(value: object) -> str:
+    return str(value).encode("utf-8", errors="replace").decode("utf-8")
+
+
+def _sanitize_for_utf8(value: Any) -> Any:
+    if isinstance(value, str):
+        return _safe_utf8_text(value)
+    if isinstance(value, list):
+        return [_sanitize_for_utf8(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_for_utf8(item) for item in value)
+    if isinstance(value, dict):
+        return {
+            _sanitize_for_utf8(key): _sanitize_for_utf8(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+async def _with_retry(fn, max_retries: int = 3):
+    for attempt in range(max_retries + 1):
+        try:
+            return await fn()
+        except Exception as error:
+            if attempt >= max_retries or not _is_retryable(error):
+                raise
+            delay = min(1000 * (2 ** attempt), 30000) / 1000 + (hash(str(time.time())) % 1000) / 1000
+            status = getattr(error, "status_code", None) or getattr(error, "status", None)
+            reason = f"HTTP {status}" if status else (getattr(error, "code", None) or "network error")
+            print_retry(attempt + 1, max_retries, reason)
+            await asyncio.sleep(delay)
 
 MODEL_CONTEXT = {
     "claude-opus-4-6": 200000,
@@ -43,6 +91,32 @@ SNIPPABLE_TOOLS = {"read_file", "grep_search", "list_files", "run_shell"}
 MICROCOMPACT_IDLE_S = 5 * 60  # 5 minutes
 
 KEEP_RECENT_RESULTS = 3
+
+
+
+def _get_max_output_tokens(model: str) -> int:
+    m = model.lower()
+    if "opus-4-6" in m:
+        return 64000
+    if "sonnet-4-6" in m:
+        return 32000
+    if any(x in m for x in ("opus-4", "sonnet-4", "haiku-4")):
+        return 32000
+    return 16384
+
+#转换tool的形式到openai
+def _to_openai_tools(tools: list[ToolDef]) -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t["description"],
+                "parameters": t["input_schema"],
+            },
+        }
+        for t in tools
+    ]
 
 
 class Agent:
@@ -69,16 +143,18 @@ class Agent:
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
-        self.effective_windos=_get_context_windows(model) -20000
+        self.effective_window=_get_context_windows(model) -20000
         self.session_id = uuid.uuid4().hex[:8]
         self.session_start_time= time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
+
         self.total_input_tokens = 0
         self.total_output_tokens = 0
-        self.last_input_tokens = 0
+        self.last_input_token_count = 0
         self.current_turns = 0
         self.last_api_call_time = 0
 
-        self._abort = False
+
+        self._aborted = False
         #存储异步任务
         self._current_task:asyncio.Task | None = None
         #权限白名单
@@ -119,7 +195,7 @@ class Agent:
 
         if self.permission_mode == "plan":
             self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = self._base_system_prompt + build_plan_mode_prompt(self._plan_file_path)
+            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt(self._plan_file_path)
         else:
             self._system_prompt = self._base_system_prompt
 
@@ -133,7 +209,7 @@ class Agent:
             if api_key:
                 kwargs["api_key"] = api_key
             if anthropic_base_url:
-                kwargs["anthropic_base_url"] = anthropic_base_url
+                kwargs["base_url"] = anthropic_base_url
             self._anthropic_client = anthropic.AsyncAnthropic(**kwargs)
             self._openai_client = None
 
@@ -161,9 +237,30 @@ class Agent:
 
     #生成一个用于保存 AI 计划（Plan）的 Markdown 文件的绝对路径。
     def _generate_plan_file_path(self) -> str:
-        d = Path.home() / ".claude" / "plans"
+        d = Path.home() / ".bear" / "plans"
         d.mkdir(parents=True, exist_ok=True)
         return str(d / f"plan-{self.session_id}.md")
+
+    def _build_plan_mode_prompt(self) -> str:
+        return f"""
+
+    # Plan Mode Active
+
+    Plan mode is active. You MUST NOT make any edits (except the plan file below), run non-readonly tools, or make any changes to the system.
+
+    ## Plan File: {self._plan_file_path}
+    Write your plan incrementally to this file using write_file or edit_file. This is the ONLY file you are allowed to edit.
+
+    ## Workflow
+    1. **Explore**: Read code to understand the task. Use read_file, list_files, grep_search.
+    2. **Design**: Design your implementation approach. Use the agent tool with type="plan" if the task is complex.
+    3. **Write Plan**: Write a structured plan to the plan file including:
+       - **Context**: Why this change is needed
+       - **Steps**: Implementation steps with critical file paths
+       - **Verification**: How to test the changes
+    4. **Exit**: Call exit_plan_mode when your plan is ready for user review.
+
+    IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
 
     #判断当前的任务所有的任务是否完成
     @property
@@ -200,7 +297,7 @@ class Agent:
         return None
     #异步任务取消（Abort）
     def abort(self) -> None:
-        self._abort = True
+        self._aborted = True
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
 
@@ -242,7 +339,7 @@ class Agent:
             self._pre_plan_mode = self.permission_mode
             self.permission_mode = "plan"
             self._plan_file_path = self._generate_plan_file_path()
-            self._system_prompt = self._base_system_prompt + build_plan_mode_prompt(self._plan_file_path)
+            self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt(self._plan_file_path)
             print_info(f"Entered plan mode. Plan file: {self._plan_file_path}")
             return "plan"
 
@@ -263,13 +360,13 @@ class Agent:
             except Exception as e:
                 print(f"[mcp] Init failed: {e}", flush=True)
 
-        self._abort = False
+        self._aborted = False
         coro = self._chat_openai(user_message) if self.use_openai else self._chat_anthropic(user_message)
         self._current_task = asyncio.create_task(coro)
         try:
-            await coro
+            await self._current_task
         except asyncio.CancelledError:
-            self._abort = True
+            self._aborted = True
 
         finally:
             self._current_task = None
@@ -297,6 +394,7 @@ class Agent:
 
     #输出工具
     def _emit_text(self, text:str)->None:
+        text = _safe_utf8_text(text)
         if self._output_buffer is not None:
             self._output_buffer.append(text)
         else:
@@ -311,7 +409,7 @@ class Agent:
             self._openai_messages.append({"role": "system", "content":self._system_prompt})
         self.total_input_tokens = 0
         self.total_output_tokens = 0
-        self.last_input_tokens = 0;
+        self.last_input_token_count = 0
         print_info("Conversation cleared.")
 
     def show_cost(self):
@@ -341,10 +439,61 @@ class Agent:
     #恢复会话信息
     def restore_session(self, data:dict)->None:
         if data.get("anthropicMessages"):
-            self._anthropic_messages = data["anthropicMessages"]
+            self._anthropic_messages = self._normalize_anthropic_messages(_sanitize_for_utf8(data["anthropicMessages"]))
         if data.get("openaiMessages"):
-            self._openai_messages = data["openaiMessages"]
+            self._openai_messages = _sanitize_for_utf8(data["openaiMessages"])
         print_info(f"Session restored ({self._get_message_count()} messages).")
+
+    def _normalize_anthropic_messages(self, messages: list[dict]) -> list[dict]:
+        role_normalized = []
+        for msg in messages:
+            copied = dict(msg)
+            content = copied.get("content")
+            if copied.get("role") == "user" and isinstance(content, list):
+                if any(isinstance(block, dict) and block.get("type") == "tool_use" for block in content):
+                    copied["role"] = "assistant"
+            role_normalized.append(copied)
+
+        normalized = []
+        i = 0
+        while i < len(role_normalized):
+            msg = role_normalized[i]
+            tool_use_ids = self._anthropic_tool_use_ids(msg)
+            if not tool_use_ids:
+                normalized.append(msg)
+                i += 1
+                continue
+
+            next_msg = role_normalized[i + 1] if i + 1 < len(role_normalized) else None
+            result_ids = self._anthropic_tool_result_ids(next_msg) if next_msg else set()
+            if tool_use_ids.issubset(result_ids):
+                normalized.append(msg)
+                normalized.append(next_msg)
+                i += 2
+                continue
+
+            i += 1
+        return normalized
+
+    @staticmethod
+    def _anthropic_tool_use_ids(msg: dict | None) -> set[str]:
+        if not msg or msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
+            return set()
+        return {
+            block.get("id")
+            for block in msg["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id")
+        }
+
+    @staticmethod
+    def _anthropic_tool_result_ids(msg: dict | None) -> set[str]:
+        if not msg or msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+            return set()
+        return {
+            block.get("tool_use_id")
+            for block in msg["content"]
+            if isinstance(block, dict) and block.get("type") == "tool_result" and block.get("tool_use_id")
+        }
 
     def _get_message_count(self) -> int:
         return len(self._openai_messages) if self.use_openai else len(self._anthropic_messages)
@@ -359,15 +508,15 @@ class Agent:
                     "startTime": self.session_start_time,
                     "messageCount": self._get_message_count(),
                 },
-                "anthropicMessages": self._anthropic_messages if not self.use_openai else None,
-                "openaiMessages": self._openai_messages if self.use_openai else None,
+                "anthropicMessages": _sanitize_for_utf8(self._anthropic_messages) if not self.use_openai else None,
+                "openaiMessages": _sanitize_for_utf8(self._openai_messages) if self.use_openai else None,
             })
         except Exception:
             pass
 
     #自动压缩
     async def _check_and_compact(self)->None:
-        if self.last_input_tokens>self.effective_windos*0.85:
+        if self.last_input_token_count>self.effective_window*0.85:
             print_info("Context window filling up, compacting conversation...")
             await self._compact_conversation()
 
@@ -388,7 +537,7 @@ class Agent:
             max_tokens=2048,
             system ="You are a conversation summarizer. Be concise but preserve important details.",
             messages=[
-                *self._anthropic_messages[:-1],
+                *_sanitize_for_utf8(self._anthropic_messages[:-1]),
                 {"role":"user",
                  "content":"Summarize the conversation so far in a concise paragraph, preserving key decisions, file paths, and context needed to continue the work."
                 }
@@ -441,7 +590,7 @@ class Agent:
     #第一层级压缩，预算压缩
     def _budget_tool_results_anthropic(self)->None:
         #计算利用率：utilization = 已用Token / 有效窗口大小。
-        utilization = self.last_input_token_count / self.effective_windos if self.effective_windos else 0
+        utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
         #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
         if utilization < 0.5:
             return
@@ -464,7 +613,7 @@ class Agent:
 
     def _budget_tool_results_openai(self)->None:
         #计算利用率：utilization = 已用Token / 有效窗口大小。
-        utilization = self.last_input_token_count / self.effective_windos if self.effective_windos else 0
+        utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
         #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
         if utilization < 0.5:
             return
@@ -767,6 +916,8 @@ class Agent:
 
 #--------------Anthropic 后端---------------
     async def  _chat_anthropic(self, user_message: str) -> None:
+        self._anthropic_messages = self._normalize_anthropic_messages(_sanitize_for_utf8(self._anthropic_messages))
+        user_message = _safe_utf8_text(user_message)
         # 先把本轮用户输入放入 Anthropic 消息历史，后续每轮模型调用都会带上这段上下文。
         self._anthropic_messages.append({"role": "user", "content": user_message})
 
@@ -782,7 +933,7 @@ class Agent:
                 )
         while True:
             # 外部请求中止时，结束整个 agent loop。
-            if self._abort:
+            if self._aborted:
                 break
 
             # 每轮调用模型前尝试压缩上下文，避免消息历史过长。
@@ -796,6 +947,7 @@ class Agent:
                     memories = memory_prefetch.task.result()
                     if memories:
                         injection_text = format_memories_for_injection(memories)
+                        injection_text = _safe_utf8_text(injection_text)
                         last = self._anthropic_messages[-1] if self._anthropic_messages else None
                         if last and last.get("role") == "user":
                             content = last.get("content", "")
@@ -851,7 +1003,7 @@ class Agent:
 
             # 把模型返回的所有 content block 写入消息历史，后续 tool_result 要与这些 tool_use 对应。
             self._anthropic_messages.append({
-                "role": "user",
+                "role": "assistant",
                 "content": [self._block_to_dict(b) for b in response.content],
             })
 
@@ -866,6 +1018,17 @@ class Agent:
             budget = self._check_budget()
             if budget["exceeded"]:
                 print_info(f"Budget exceeded: {budget['reason']}")
+                self._anthropic_messages.append({
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": f"Tool execution skipped: {budget['reason']}",
+                        }
+                        for tu in tool_uses
+                    ],
+                })
                 break
 
 
@@ -875,7 +1038,7 @@ class Agent:
 
             for tu in tool_uses:
                 # context_break 表示某个工具执行期间清理了上下文，需要停止继续处理本轮剩余工具。
-                if context_break or self._abort:
+                if context_break or self._aborted:
                     break
 
                 # 将工具入参转为普通 dict，便于权限检查、打印和实际执行。
@@ -885,7 +1048,11 @@ class Agent:
                 # 如果这个工具已经在流式阶段提前开始执行，这里只需要等待它完成并收集结果。
                 early_task = early_executions.get(tu.id)
                 if early_task:
-                    raw = await early_task
+                    try:
+                        raw = await early_task
+                    except Exception as e:
+                        raw = f"Error executing tool: {e}"
+                    raw = _safe_utf8_text(raw)
                     res = self._persist_large_result(tu.name, raw)
                     print_tool_result(tu.name, res)
                     tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": res})
@@ -911,7 +1078,11 @@ class Agent:
                     self._confirmed_paths.add(perm["message"])
 
                 # 权限通过后执行工具，并把大输出持久化为可回传的摘要或引用。
-                raw = await self._execute_tool_call(tu.name, inp)
+                try:
+                    raw = await self._execute_tool_call(tu.name, inp)
+                except Exception as e:
+                    raw = f"Error executing tool: {e}"
+                raw = _safe_utf8_text(raw)
                 res = self._persist_large_result(tu.name, raw)
                 print_tool_result(tu.name, res)
 
@@ -926,22 +1097,25 @@ class Agent:
                 # Anthropic 要求 tool_result 使用 tool_use_id 对应到前面的 tool_use block。
                 tool_results.append({"type": "tool_result", "tool_use_id": tu.id, "content": res})
 
-                if not context_break and tool_results:
-                    # 把当前累计的工具结果追加到消息历史，下一轮模型调用即可读取这些结果。
-                    self._anthropic_messages.append({"role": "user", "content": tool_results})
-                self._context_cleared = False
+            if not context_break and tool_results:
+                # Anthropic 要求 assistant/tool_use 后面紧跟一条 user/tool_result 消息，
+                # 且这条消息必须包含本轮所有 tool_use 的对应结果。
+                self._anthropic_messages.append({"role": "user", "content": tool_results})
 
-                # 工具结果可能很长，每次工具执行后检查是否需要压缩上下文。
-                await self._check_and_compact()
+            self._context_cleared = False
+
+            # 工具结果可能很长，每轮工具执行后检查是否需要压缩上下文。
+            await self._check_and_compact()
 
     @staticmethod
     def _block_to_dict(block) -> dict:
         if block.type == "text":
-            return {"type": "text", "text": block.text}
+            return {"type": "text", "text": _safe_utf8_text(block.text)}
         if block.type == "tool_use":
-            return {"type": "tool_use", "id": block.id, "name": block.name, "input": dict(block.input) if hasattr(block.input, 'items') else block.input}
+            raw_input = dict(block.input) if hasattr(block.input, 'items') else block.input
+            return {"type": "tool_use", "id": _safe_utf8_text(block.id), "name": _safe_utf8_text(block.name), "input": _sanitize_for_utf8(raw_input)}
         # Fallback
-        return {"type": block.type}
+        return {"type": _safe_utf8_text(block.type)}
 
     async def _call_anthropic_stream(self, on_tool_block_complete=None):
 
@@ -951,9 +1125,9 @@ class Agent:
             create_params: dict[str, Any] = {
                 "model": self.model,
                 "max_tokens": max_output if self._thinking_mode != "disabled" else 16384,
-                "system": self._system_prompt,
-                "tools": get_active_tool_definitions(self.tools),
-                "messages": self._anthropic_messages,
+                "system": _safe_utf8_text(self._system_prompt),
+                "tools": _sanitize_for_utf8(get_active_tool_definitions(self.tools)),
+                "messages": _sanitize_for_utf8(self._anthropic_messages),
             }
 
             if self._thinking_mode  in ("adaptive", "enabled"):
@@ -993,36 +1167,263 @@ class Agent:
                         elif hasattr(delta, 'partial_json'):
                             tb = tool_blocks_by_index.get(event.index)
                             if tb:
-                                tb["input_json"] += delta.partial_json
+                                tb["input_json"] += _safe_utf8_text(delta.partial_json)
 
                     elif event.type == "content_block_stop":
                         tb = tool_blocks_by_index.pop(event.index, None)
+                        if tb and on_tool_block_complete:
+                            import json as _json
+                            try:
+                                parsed = _json.loads(tb["input_json"] or "{}")
+                            except Exception:
+                                parsed = {}
+                            on_tool_block_complete({
+                                "type": "tool_use", "id": _safe_utf8_text(tb["id"]),
+                                "name": _safe_utf8_text(tb["name"]), "input": _sanitize_for_utf8(parsed),
+                            })
+                final_message = await stream.get_final_message()
 
+            #过滤思考的message
+            final_message.content = [b for b in final_message.content if b.type != "thinking"]
+            return final_message
 
+        return await _with_retry(_do)
 
+    #openAI后端
 
+    async def _chat_openai(self, user_message:str) -> None:
+        user_message = _safe_utf8_text(user_message)
+        self._openai_messages.append({"role": "user", "content": user_message})
 
+        #预取句柄 MemoryPrefetch
+        memory_prefetch: MemoryPrefetch | None = None
+        if not self.is_sub_agent:
+            sq = self._build_side_query()
+            if sq:
+                memory_prefetch = start_memory_prefetch(
+                    user_message, sq,
+                    self._already_surfaced_memories, self._session_memory_bytes,
+                )
 
+        while True:
+            if self._aborted:
+                break
 
+            self._run_compression_pipeline()
 
+            if memory_prefetch and memory_prefetch.settled and not memory_prefetch.consumed:
+                memory_prefetch.consumed = True
+                try:
+                    memories = memory_prefetch.task.result()
+                    if memories:
+                        injection_text = format_memories_for_injection(memories)
+                        injection_text = _safe_utf8_text(injection_text)
+                        last = self._openai_messages[-1] if self._openai_messages else None
 
+                        if last and last.get("role") == "user":
+                            last["content"] = (last.get("content") or "") + "\n\n" + injection_text
+                        else:
+                            self._openai_messages.append({"role": "user", "content": injection_text})
 
+                        for m in memories:
+                            self._already_surfaced_memories.add(m.path)
+                            self._session_memory_bytes += len(m.content.encode())
+                except Exception:
+                    pass
 
+            if not self.is_sub_agent:
+                start_spinner()
 
+            response = await self._call_openai_stream()
 
+            if not self.is_sub_agent:
+                stop_spinner()
 
+            self.last_api_call_time = time.time()
 
+            if response.get("usage"):
+                self.total_input_tokens += response["usage"]["prompt_tokens"]
+                self.total_output_tokens += response["usage"]["completion_tokens"]
+                self.last_input_token_count = response["usage"]["prompt_tokens"]
 
+            choice = response.get("choices", [{}])[0] if response.get("choices") else {}
+            message = choice.get("message", {})
 
+            self._openai_messages.append(message)
 
+            tool_calls = message.get("tool_calls")
 
+            if not tool_calls:
+                if not self.is_sub_agent:
+                    print_cost(self.total_input_tokens, self.total_output_tokens)
+                break
 
+            self.current_turns += 1
+            budget = self._check_budget()
+            if budget["exceeded"]:
+                print_info(f"Budget exceeded: {budget['reason']}")
+                break
 
+            oai_checked: list[dict] = []
+            for tc in tool_calls:
+                if self._aborted:
+                    break
 
+                if tc.get("type") != "function":
+                    continue
 
+                fn_name = tc["function"]["name"]
+                try:
+                    inp = json.loads(tc["function"]["arguments"])
+                except Exception:
+                    inp = {}
 
+                print_tool_call(fn_name, inp)
 
+                perm = check_permission(fn_name, inp, self.permission_mode, self._plan_file_path)
 
+                if perm["action"] == "deny":
+                    print_info(f"Denied: {perm.get('message', '')}")
+                    oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": False,
+                                        "result": f"Action denied: {perm.get('message', '')}"})
+                    continue
+                if perm["action"] == "confirm" and perm.get("message") and perm["message"] not in self._confirmed_paths:
+                    confirmed = await self._confirm_dangerous(perm["message"])
+                    if not confirmed:
+                        oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": False,
+                                            "result": "User denied this action."})
+                        continue
+                    self._confirmed_paths.add(perm["message"])
+                oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": True})
 
+                oai_batches: list[dict] = []
+                for ct in oai_checked:
+                    safe = ct["allowed"] and ct["fn"] in CONCURRENCY_SAFE_TOOLS
+                    if safe and oai_batches and oai_batches[-1]["concurrent"]:
+                        oai_batches[-1]["items"].append(ct)
+                    else:
+                        oai_batches.append({"concurrent": safe, "items": [ct]})
 
+                oai_context_break = False
+                for batch in oai_batches:
+                    if oai_context_break or self._aborted:
+                        break
 
+                    if batch["concurrent"]:
+                        async def _run_oai_safe(ct_item: dict) -> tuple[dict, str]:
+                            raw = await self._execute_tool_call(ct_item["fn"], ct_item["inp"])
+                            raw = _safe_utf8_text(raw)
+                            res = self._persist_large_result(ct_item["fn"], raw)
+                            print_tool_result(ct_item["fn"], res)
+                            return ct_item, res
+
+                        results = await asyncio.gather(*[_run_oai_safe(ct) for ct in batch["items"]])
+                        for ct_item, res in results:
+                            self._openai_messages.append(
+                                {"role": "tool", "tool_call_id": ct_item["tc"]["id"], "content": res})
+                    else:
+                        for ct in batch["items"]:
+                            if not ct["allowed"]:
+                                self._openai_messages.append(
+                                    {"role": "tool", "tool_call_id": ct["tc"]["id"], "content": ct["result"]})
+                                continue
+
+                            raw = await self._execute_tool_call(ct["fn"], ct["inp"])
+                            raw = _safe_utf8_text(raw)
+                            res = self._persist_large_result(ct["fn"], raw)
+                            print_tool_result(ct["fn"], res)
+
+                            if self._context_cleared:
+                                self._context_cleared = False
+                                self._openai_messages.append({"role": "user", "content": res})
+                                oai_context_break = True
+                                break
+
+                            self._openai_messages.append(
+                                {"role": "tool", "tool_call_id": ct["tc"]["id"], "content": res})
+
+            self._context_cleared = False
+            await self._check_and_compact()
+
+    async def _call_openai_stream(self) -> dict:
+        async def _do():
+            stream = await self._openai_client.chat.completions.create(
+                model=self.model,
+                tools=_sanitize_for_utf8(_to_openai_tools(get_active_tool_definitions(self.tools))),
+                messages=_sanitize_for_utf8(self._openai_messages),
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+
+            content = ""
+            first_text = True
+            tool_calls: dict[int, dict] = {}
+            finish_reason = ""
+            usage = None
+
+            async for chunk in stream:
+                if chunk.usage:
+                    usage = {
+                        "prompt_tokens": chunk.usage.prompt_tokens,
+                        "completion_tokens": chunk.usage.completion_tokens,
+                    }
+
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
+
+                if delta and delta.content:
+                    if first_text:
+                        stop_spinner()
+                        self._emit_text("\n")
+                        first_text = False
+                    self._emit_text(delta.content)
+                    content += _safe_utf8_text(delta.content)
+
+                if delta and delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        existing = tool_calls.get(tc.index)
+                        if existing:
+                            if tc.function and tc.function.arguments:
+                                existing["arguments"] += _safe_utf8_text(tc.function.arguments)
+                        else:
+                            tool_calls[tc.index] = {
+                                "id": _safe_utf8_text(tc.id or ""),
+                                "name": _safe_utf8_text((tc.function.name if tc.function else "") or ""),
+                                "arguments": _safe_utf8_text((tc.function.arguments if tc.function else "") or ""),
+                            }
+
+                if chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
+
+            assembled = None
+            if tool_calls:
+                assembled = [
+                    {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                    for _, tc in sorted(tool_calls.items())
+                ]
+
+            return {
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "content": content or None,
+                        "tool_calls": assembled,
+                    },
+                    "finish_reason": finish_reason or "stop",
+                }],
+                "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0},
+            }
+
+        return await _with_retry(_do)
+
+    async def _confirm_dangerous(self, command: str) -> bool:
+        print_confirmation(command)
+        if self.confirm_fn:
+            return await self.confirm_fn(command)
+        # Fallback: blocking input
+        try:
+            answer = input("  Allow? (y/n): ")
+            return answer.lower().startswith("y")
+        except EOFError:
+            return False

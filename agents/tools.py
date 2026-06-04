@@ -24,6 +24,22 @@ EDIT_TOOLS = {"write_file", "edit_file"}
 CONCURRENCY_SAFE_TOOLS = {"read_file", "list_files", "grep_search", "web_fetch"}
 
 
+
+
+
+
+
+def get_active_tool_definitions(all_tools: list[ToolDef] | None = None) -> list[ToolDef]:
+    """过滤并返回当前可用的工具定义列表，主要用于 API 调用前剔除尚未激活的“延迟工具”（deferred tools），并删除无关的元数据字段。"""
+    tools = all_tools if all_tools is not None else tool_definitions
+    return [
+        {k: v for k, v in t.items() if k != "deferred"}
+        for t in tools
+        if not t.get("deferred") or t["name"] in _activated_tools
+    ]
+
+
+
 #工具定义
 tool_definitions: list[ToolDef] = [
     {
@@ -101,7 +117,7 @@ tool_definitions: list[ToolDef] = [
     },
     {
         "name": "skill",
-        "description": "Invoke a registered skill by name. Skills are prompt templates loaded from .claude/skills/. Returns the skill's resolved prompt to follow.",
+        "description": "Invoke a registered skill by name. Skills are prompt templates loaded from .bear/skills/. Returns the skill's resolved prompt to follow.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -168,10 +184,28 @@ tool_definitions: list[ToolDef] = [
 
 #----------------------工具调用----------------------------
 
+def _resolve_tool_path(raw_path: str, *, must_exist: bool = True) -> Path:
+    path = Path(raw_path)
+    if path.exists() or not path.is_absolute():
+        return path
+
+    parts = path.parts
+    cwd = Path.cwd()
+    for i in range(1, len(parts)):
+        candidate = cwd.joinpath(*parts[i:])
+        if must_exist and candidate.exists():
+            return candidate
+        if not must_exist and candidate.parent.exists():
+            return candidate
+
+    return path
+
+
 #读取文件并且在读取文件的基础上添加行号
 def _read_file(inp:dict) -> str:
     try:
-        content = Path(inp["file_path"]).read_text()
+        path = _resolve_tool_path(inp["file_path"])
+        content = path.read_text(errors="replace")
         lines = content.split("\n")
         numbered = "\n".join(f"{i + 1:4d} | {line}" for i, line in enumerate(lines))
         return numbered
@@ -180,7 +214,7 @@ def _read_file(inp:dict) -> str:
 
 def _write_file(inp:dict) -> str:
     try:
-        path = Path(inp["file_path"])
+        path = _resolve_tool_path(inp["file_path"], must_exist=False)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(inp["content"])
         _auto_update_memory_index(str(path))
@@ -253,8 +287,8 @@ def _generate_diff(old_content: str, old_string: str, new_string: str) -> str:
 #编辑文件
 def _edit_file(inp: dict) -> str:
     try:
-        path = Path(inp["file_path"])
-        content = path.read_text()
+        path = _resolve_tool_path(inp["file_path"])
+        content = path.read_text(errors="replace")
 
         actual = _find_actual_string(content, inp["old_string"])
         if not actual:
@@ -278,7 +312,7 @@ def _edit_file(inp: dict) -> str:
 
 def _list_files(inp: dict) -> str:
     try:
-        base = Path(inp.get("path") or ".")
+        base = _resolve_tool_path(inp.get("path") or ".")
         pattern = inp["pattern"]
         files = []
         for p in base.glob(pattern):
@@ -303,7 +337,7 @@ def _list_files(inp: dict) -> str:
 
 def _grep_search(inp: dict) -> str:
     pattern = inp["pattern"]
-    path = inp.get("path") or "."
+    path = str(_resolve_tool_path(inp.get("path") or "."))
     include = inp.get("include")
 
     if not IS_WIN:
@@ -311,7 +345,7 @@ def _grep_search(inp: dict) -> str:
             args = ["grep", "--line-number", "--color=never", "-r"]
             if include:
                 args.append(f"--include={include}")
-            args.append(["--", pattern, path])
+            args.extend(["--", pattern, path])
 
             result = subprocess.run(
                 args, capture_output=True, text=True, timeout=10
@@ -606,10 +640,10 @@ def check_permission(
     if tool_name == "run_shell" and is_dangerous(inp.get("command", "")):
         needs_confirm = True
         confirm_message = inp.get("command", "")
-    elif tool_name == "write_file" and not Path(inp.get("file_path", "")).exists():
+    elif tool_name == "write_file" and not _resolve_tool_path(inp.get("file_path", ""), must_exist=False).exists():
         needs_confirm = True
         confirm_message = f"write new file: {inp.get('file_path', '')}"
-    elif tool_name == "edit_file" and not Path(inp.get("file_path", "")).exists():
+    elif tool_name == "edit_file" and not _resolve_tool_path(inp.get("file_path", "")).exists():
         needs_confirm = True
         confirm_message = f"edit non-existent file: {inp.get('file_path', '')}"
 
@@ -634,7 +668,7 @@ async def execute_tool(
     if name == "read_file":
         result = _read_file(inp)
         if read_file_state is not None and not result.startswith("Error"):
-            abs_path = str(Path(inp["file_path"]).resolve())
+            abs_path = str(_resolve_tool_path(inp["file_path"]).resolve())
             try:
                 read_file_state[abs_path] =  os.path.getmtime(abs_path)
             except OSError:
@@ -642,7 +676,7 @@ async def execute_tool(
         return _truncate_result(result)
 
     if name in ("write_file", "edit_file") and read_file_state is not None:
-        abs_path = str(Path(inp["file_path"]).resolve())
+        abs_path = str(_resolve_tool_path(inp["file_path"], must_exist=(name == "edit_file")).resolve())
         if os.path.exists(abs_path):
             if abs_path not in read_file_state:
                 verb = "writing" if name == "write_file" else "editing"
@@ -687,7 +721,7 @@ async def execute_tool(
 
     # 更新时间
     if name in ("write_file", "edit_file") and read_file_state is not None and not result.startswith("Error"):
-        abs_path = str(Path(inp["file_path"]).resolve())
+        abs_path = str(_resolve_tool_path(inp["file_path"], must_exist=False).resolve())
         try:
             read_file_state[abs_path] = os.path.getmtime(abs_path)
         except OSError:
@@ -700,10 +734,6 @@ async def execute_tool(
 def reset_permission_cache() -> None:
     global _cached_rules
     _cached_rules = None
-
-
-
-
 
 
 
