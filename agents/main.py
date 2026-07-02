@@ -12,10 +12,30 @@ from urllib.parse import urlparse
 from dotenv import find_dotenv, load_dotenv
 
 from .agent import Agent
-from .ui import print_welcome, print_user_prompt, print_error, print_info, print_plan_for_approval, print_plan_approval_options
+from .ui import (
+    print_welcome,
+    print_user_prompt,
+    print_error,
+    print_info,
+    print_plan_for_approval,
+    print_plan_approval_options,
+    print_goodbye,
+    print_interrupted,
+    print_memory_entries,
+    print_skill_entries,
+    print_warning,
+)
 from .session import load_session, get_latest_session_id
 from .memory import list_memories
-from .skills import discover_skills, resolve_skill_prompt, get_skill_by_name, execute_skill
+from .skills import (
+    create_skill,
+    discover_skills,
+    evolve_skill,
+    execute_skill,
+    get_skill_by_name,
+    record_feedback,
+    skill_stats,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -135,7 +155,7 @@ async def run_repl(agent: Agent) -> None:
                     feedback = ""
                 return {"choice": "keep-planning", "feedback": feedback or None}
             else:
-                print("  Invalid choice. Enter 1, 2, 3, or 4.")
+                print_warning("Invalid choice. Enter 1, 2, 3, or 4.")
 
     agent.set_plan_approval_fn(plan_approval_fn)
 
@@ -146,15 +166,15 @@ async def run_repl(agent: Agent) -> None:
         if agent._aborted is False and agent._output_buffer is not None:
             # Agent is processing
             agent.abort()
-            print("\n  (interrupted)")
+            print_interrupted()
             sigint_count = 0
             print_user_prompt()
         else:
             sigint_count += 1
             if sigint_count >= 2:
-                print("\nBye!\n")
+                print_goodbye()
                 sys.exit(0)
-            print("\n  Press Ctrl+C again to exit.")
+            print_warning("Press Ctrl+C again to exit.")
             print_user_prompt()
 
     signal.signal(signal.SIGINT, handle_sigint)
@@ -165,7 +185,7 @@ async def run_repl(agent: Agent) -> None:
         try:
             line = input()
         except (EOFError, KeyboardInterrupt):
-            print("\nBye!\n")
+            print_goodbye()
             break
 
         inp = line.strip()
@@ -174,7 +194,7 @@ async def run_repl(agent: Agent) -> None:
         if not inp:
             continue
         if inp in ("exit", "quit"):
-            print("\nBye!\n")
+            print_goodbye()
             break
 
         # REPL commands
@@ -198,19 +218,68 @@ async def run_repl(agent: Agent) -> None:
             if not memories:
                 print_info("No memories saved yet.")
             else:
-                print_info(f"{len(memories)} memories:")
-                for m in memories:
-                    print(f"    [{m.type}] {m.name} — {m.description}")
+                print_memory_entries(memories)
             continue
         if inp == "/skills":
             skills = discover_skills()
             if not skills:
                 print_info("No skills found. Add skills to .bear/skills/<name>/SKILL.md")
             else:
-                print_info(f"{len(skills)} skills:")
-                for s in skills:
-                    tag = f"/{s.name}" if s.user_invocable else s.name
-                    print(f"    {tag} ({s.source}) — {s.description}")
+                print_skill_entries(skills)
+            continue
+        if inp == "/skill-stats":
+            print_info(skill_stats())
+            continue
+        if inp.startswith("/extract_now"):
+            hint = inp[len("/extract_now") :].strip()
+            result = await agent.extract_now(hint)
+            if result.get("ok"):
+                print_info("Ran online skill extraction for the current pending window.")
+            else:
+                print_error(str(result.get("error") or result))
+            continue
+        if inp.startswith("/skill-feedback "):
+            _, rest = inp.split(" ", 1)
+            parts = rest.strip().split(" ", 2)
+            if len(parts) < 2:
+                print_error("Usage: /skill-feedback <skill-name> <rating> [note]")
+                continue
+            note = parts[2] if len(parts) > 2 else ""
+            record_feedback(parts[0], parts[1], note)
+            print_info(f"Recorded feedback for skill: {parts[0]}")
+            continue
+        if inp.startswith("/skill-evolve "):
+            _, rest = inp.split(" ", 1)
+            parts = rest.strip().split(" ", 1)
+            if len(parts) < 2:
+                print_error("Usage: /skill-evolve <skill-name> <durable lesson>")
+                continue
+            result = evolve_skill(parts[0], parts[1], rationale="Manual REPL evolution", target="active")
+            if result.get("ok"):
+                print_info(f"Evolved skill {result.get('skill')} to version {result.get('version')}")
+            else:
+                print_error(str(result.get("error") or result))
+            continue
+        if inp.startswith("/skill-create "):
+            _, rest = inp.split(" ", 1)
+            parts = [part.strip() for part in rest.split("|", 3)]
+            if len(parts) < 4 or not all(parts[:4]):
+                print_error("Usage: /skill-create <name> | <description> | <when-to-use> | <instructions>")
+                continue
+            result = create_skill(
+                name=parts[0],
+                description=parts[1],
+                when_to_use=parts[2],
+                instructions=parts[3],
+                target="project",
+                context="inline",
+                user_invocable=False,
+                evidence="Manual REPL skill creation",
+            )
+            if result.get("ok"):
+                print_info(f"Created skill {result.get('skill')} at {result.get('file')}")
+            else:
+                print_error(str(result.get("error") or result))
             continue
 
         # Skill invocation: /<skill-name> [args]
@@ -223,12 +292,13 @@ async def run_repl(agent: Agent) -> None:
                 print_info(f"Invoking skill: {skill.name}")
                 try:
                     if skill.context == "fork":
-                        result = execute_skill(skill.name, cmd_args)
-                        if result:
-                            await agent.chat(f'Use the skill tool to invoke "{skill.name}" with args: {cmd_args or "(none)"}')
+                        await agent.chat(f'Use the skill tool to invoke "{skill.name}" with args: {cmd_args or "(none)"}')
                     else:
-                        resolved = resolve_skill_prompt(skill, cmd_args)
-                        await agent.chat(resolved)
+                        result = execute_skill(skill.name, cmd_args)
+                        if not result:
+                            print_error(f"Unknown skill: {skill.name}")
+                            continue
+                        await agent.chat(result["prompt"])
                 except Exception as e:
                     if "abort" not in str(e).lower():
                         print_error(str(e))
@@ -240,6 +310,12 @@ async def run_repl(agent: Agent) -> None:
         except Exception as e:
             if "abort" not in str(e).lower():
                 print_error(str(e))
+    await agent.drain_background_skill_tasks()
+
+
+async def run_one_shot(agent: Agent, prompt: str) -> None:
+    await agent.chat(prompt)
+    await agent.drain_background_skill_tasks()
 
 
 def main() -> None:
@@ -259,7 +335,7 @@ Options:
   --accept-edits      Auto-approve file edits, still confirm dangerous shell
   --dont-ask          Auto-deny anything needing confirmation (for CI)
   --thinking          Enable extended thinking (Anthropic only)
-  --model, -m         Model to use (default: claude-opus-4-6, or MINI_CLAUDE_MODEL env)
+  --model, -m         Model to use (default: deepseek-chat, or MODEL env)
   --api-base URL      Override API base URL from CLI or .env
   --resume            Resume the last session
   --max-cost USD      Stop when estimated cost exceeds this amount
@@ -273,6 +349,11 @@ REPL commands:
   /compact            Manually compact conversation
   /memory             List saved memories
   /skills             List available skills
+  /skill-stats        Show skill usage and evolution stats
+  /extract_now        Extract the current pending online skill window: /extract_now [hint]
+  /skill-feedback     Record feedback: /skill-feedback <skill> <rating> [note]
+  /skill-evolve       Evolve a skill: /skill-evolve <skill> <durable lesson>
+  /skill-create       Create a skill: /skill-create <name> | <description> | <when-to-use> | <instructions>
   /<skill-name>       Invoke a skill (e.g. /commit "fix types")
 
 Examples:
@@ -280,8 +361,8 @@ Examples:
   mini-claude --yolo "run all tests and fix failures"
   mini-claude --plan "how would you refactor this?"
   mini-claude --max-cost 0.50 --max-turns 20 "implement feature X"
-  APIKEY=sk-xxx API=https://api.deepseek.com/anthropic mini-claude --model claude-sonnet-4-6 "hello"
-  OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=https://aihubmix.com/v1 mini-claude --model gpt-4o "hello"
+  MODEL=deepseek-chat APIKEY=sk-xxx API=https://api.deepseek.com/anthropic mini-claude "hello"
+  MODEL=gpt-4o OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=https://aihubmix.com/v1 mini-claude "hello"
   mini-claude --resume
   mini-claude  # starts interactive REPL
 """)
@@ -289,8 +370,8 @@ Examples:
 
     # 将命令行布尔开关统一转换成 Agent 内部使用的权限模式。
     permission_mode = _resolve_permission_mode(args)
-    # 模型优先使用命令行参数，其次读取环境变量，最后回落到默认模型。
-    model = args.model or os.environ.get("MINI_CLAUDE_MODEL", "claude-opus-4-6")
+    # 模型优先使用命令行参数，其次读取 .env 中的 MODEL，最后回落到默认模型。
+    model = args.model or os.environ.get("MODEL") or "deepseek-chat"
     resolved_api_base, resolved_api_key, resolved_use_openai = _resolve_api_config(args.api_base)
 
     # 没有可用 API key 时无法调用模型，直接提示配置方式并退出。
@@ -338,7 +419,7 @@ Examples:
         # One-shot mode
         # 一次性模式：执行完用户 prompt 后进程结束。
         try:
-            asyncio.run(agent.chat(prompt))
+            asyncio.run(run_one_shot(agent, prompt))
         except Exception as e:
             print_error(str(e))
             sys.exit(1)

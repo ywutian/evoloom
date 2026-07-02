@@ -16,12 +16,12 @@ ToolDef = dict  # Anthropic tool schema dict
 #权限模式
 PermissionMode = str  # "default" | "plan" | "acceptEdits" | "bypassPermissions" | "dontAsk"
 
-READ_TOOLS = {"read_file", "list_files", "grep_search", "web_fetch"}
-EDIT_TOOLS = {"write_file", "edit_file"}
+READ_TOOLS = {"read_file", "list_files", "grep_search"}
+EDIT_TOOLS = {"write_file", "edit_file", "skill_evolve", "skill_create"}
 
 
 #并发安全的工具可以并行运行（只读，无副作用）
-CONCURRENCY_SAFE_TOOLS = {"read_file", "list_files", "grep_search", "web_fetch"}
+CONCURRENCY_SAFE_TOOLS = {"read_file", "list_files", "grep_search"}
 
 
 
@@ -128,15 +128,48 @@ tool_definitions: list[ToolDef] = [
         },
     },
     {
-        "name": "web_fetch",
-        "description": "Fetch a URL and return its content as text. For HTML pages, tags are stripped to return readable text. For JSON/text responses, content is returned directly.",
+        "name": "skill_evolve",
+        "description": "Persist an explicit reusable user correction or workflow preference into an existing skill. Creates a version snapshot before editing the skill.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "The URL to fetch"},
-                "max_length": {"type": "number", "description": "Maximum content length in characters (default 50000)"},
+                "skill_name": {"type": "string", "description": "The registered skill name to evolve"},
+                "lesson": {"type": "string", "description": "Durable reusable rule to add to the skill"},
+                "rationale": {"type": "string", "description": "Why this lesson should affect future similar tasks"},
+                "target": {
+                    "type": "string",
+                    "enum": ["active", "project", "user"],
+                    "description": "Which skill file to update. Defaults to active.",
+                },
             },
-            "required": ["url"],
+            "required": ["skill_name", "lesson"],
+        },
+    },
+    {
+        "name": "skill_create",
+        "description": "Create a new reusable skill from explicit durable workflow guidance when no suitable existing skill exists.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Concise reusable skill name"},
+                "description": {"type": "string", "description": "One-sentence description of what the skill does and when to use it"},
+                "instructions": {"type": "string", "description": "Reusable SKILL.md body. Focus on durable method, constraints, and workflow, not one-off task content."},
+                "when_to_use": {"type": "string", "description": "Trigger condition for auto-invocation"},
+                "target": {
+                    "type": "string",
+                    "enum": ["project", "user"],
+                    "description": "Where to create the skill. Defaults to project.",
+                },
+                "context": {
+                    "type": "string",
+                    "enum": ["inline", "fork"],
+                    "description": "Skill execution mode. Defaults to inline.",
+                },
+                "user_invocable": {"type": "boolean", "description": "Whether users can invoke it manually with /<skill>. Defaults to false."},
+                "allowed_tools": {"type": "string", "description": "Optional comma-separated allowed tools for fork mode"},
+                "evidence": {"type": "string", "description": "Short user-provided evidence showing why this is reusable"},
+            },
+            "required": ["name", "description", "instructions"],
         },
     },
     {
@@ -468,40 +501,6 @@ def _run_shell(inp: dict) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-#网页抓取
-def _web_fetch(inp: dict) -> str:
-    import urllib.request
-    import urllib.error
-
-    url = inp.get("url", "")
-    max_length = inp.get("max_length", 50000)
-    req = urllib.request.Request(url, headers={"User-Agent": "mini-claude/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            content_type = resp.headers.get("Content-Type", "")
-            text = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        return f"HTTP error: {e.code} {e.reason}"
-    except urllib.error.URLError as e:
-        return f"Error fetching {url}: {e.reason}"
-    except Exception as e:
-        return f"Error fetching {url}: {e}"
-
-    if "html" in content_type:
-        text = re.sub(r"<script[\s\S]*?</script>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"<style[\s\S]*?</style>", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"<[^>]*>", " ", text)
-        text = text.replace("&nbsp;", " ").replace("&amp;", "&")
-        text = text.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"')
-        text = re.sub(r"\s{2,}", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text)
-        text = text.strip()
-
-    if len(text) > max_length:
-        text = text[:max_length] + f"\n\n[... truncated at {max_length} characters]"
-
-    return text or "(empty response)"
-
 
 #危险命令检测模式列表
 
@@ -646,6 +645,12 @@ def check_permission(
     elif tool_name == "edit_file" and not _resolve_tool_path(inp.get("file_path", "")).exists():
         needs_confirm = True
         confirm_message = f"edit non-existent file: {inp.get('file_path', '')}"
+    elif tool_name == "skill_evolve":
+        needs_confirm = True
+        confirm_message = f"evolve skill: {inp.get('skill_name', '')}"
+    elif tool_name == "skill_create":
+        needs_confirm = True
+        confirm_message = f"create skill: {inp.get('name', '')}"
 
     if needs_confirm:
         if mode == "dontAsk":
@@ -704,13 +709,39 @@ async def execute_tool(
              matches],
             indent=2,
         )
+    if name == "skill_evolve":
+        from .skills import evolve_skill
+
+        result = evolve_skill(
+            skill_name=inp.get("skill_name", ""),
+            lesson=inp.get("lesson", ""),
+            rationale=inp.get("rationale", ""),
+            target=inp.get("target", "active"),
+        )
+        return _truncate_result(json.dumps(result, ensure_ascii=False, indent=2))
+
+    if name == "skill_create":
+        from .skills import create_skill
+
+        result = create_skill(
+            name=inp.get("name", ""),
+            description=inp.get("description", ""),
+            instructions=inp.get("instructions", ""),
+            when_to_use=inp.get("when_to_use", "") or inp.get("when-to-use", ""),
+            target=inp.get("target", "project"),
+            context=inp.get("context", "inline"),
+            user_invocable=bool(inp.get("user_invocable", False)),
+            allowed_tools=inp.get("allowed_tools"),
+            evidence=inp.get("evidence", ""),
+        )
+        return _truncate_result(json.dumps(result, ensure_ascii=False, indent=2))
+
     handlers: dict = {
         "write_file": _write_file,
         "edit_file": _edit_file,
         "list_files": _list_files,
         "grep_search": _grep_search,
         "run_shell": _run_shell,
-        "web_fetch": _web_fetch,
     }
     handler = handlers.get(name)
 
@@ -734,10 +765,6 @@ async def execute_tool(
 def reset_permission_cache() -> None:
     global _cached_rules
     _cached_rules = None
-
-
-
-
 
 
 
