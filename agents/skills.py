@@ -4,7 +4,7 @@ import json
 import math
 import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,7 @@ class SkillDefinition:
 _cached_skills: list[SkillDefinition] | None = None
 
 
-def execute_skill(skill_name:str, args:object)-> dict | None:
+def execute_skill(skill_name: str, args: object) -> dict | None:
     # skill 工具的执行入口：按名字找到 skill，并返回解析后的 prompt 和执行配置。
     skill = get_skill_by_name(skill_name)
     if not skill:
@@ -60,9 +60,9 @@ def execute_skill(skill_name:str, args:object)-> dict | None:
     }
 
 
-
 def resolve_skill_prompt(skill: SkillDefinition, args: object) -> str:
     import re
+
     prompt = skill.prompt_template
     # 支持在 SKILL.md 正文中使用 $ARGUMENTS 或 ${ARGUMENTS} 引用用户参数。
     prompt = re.sub(r"\$ARGUMENTS|\$\{ARGUMENTS\}", str(args or ""), prompt)
@@ -70,19 +70,21 @@ def resolve_skill_prompt(skill: SkillDefinition, args: object) -> str:
     prompt = prompt.replace("${CLAUDE_SKILL_DIR}", skill.skill_dir)
     return prompt
 
-def get_skill_by_name(skill_name:str)->SkillDefinition | None:
+
+def get_skill_by_name(skill_name: str) -> SkillDefinition | None:
     # 通过 name 查找 skill；name 来自 frontmatter，没有写时使用目录名。
     for s in discover_skills():
         if s.name == skill_name:
             return s
     return None
 
+
 def discover_skills() -> list[SkillDefinition]:
     global _cached_skills
     if _cached_skills is not None:
         return _cached_skills
 
-    skills: dict[str,SkillDefinition] = {}
+    skills: dict[str, SkillDefinition] = {}
     # 用户级 skills 优先级最高：~/.bear/skills/<name>/SKILL.md
     user_dir = Path.home() / ".bear" / "skills"
     _load_skills_from_dir(user_dir, "user", skills)
@@ -93,7 +95,10 @@ def discover_skills() -> list[SkillDefinition]:
     _cached_skills = list(skills.values())
     return _cached_skills
 
-def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDefinition], overwrite: bool = True) -> None:
+
+def _load_skills_from_dir(
+    base_dir: Path, source: str, skills: dict[str, SkillDefinition], overwrite: bool = True
+) -> None:
     # 只加载目录形式的 skill，不加载 .bear/skills/foo.md 这种单文件形式。
     if not base_dir.is_dir():
         return
@@ -101,7 +106,7 @@ def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDe
         if not entry.is_dir():
             continue
         # 文件名必须是 SKILL.md，大小写要一致。
-        skill_file = entry/  "SKILL.md"
+        skill_file = entry / "SKILL.md"
         if not skill_file.exists():
             continue
         skill = _parse_skill_file(skill_file, source, str(entry))
@@ -110,6 +115,7 @@ def _load_skills_from_dir( base_dir: Path, source: str, skills:dict[str, SkillDe
             if not overwrite and skill.name in skills:
                 continue
             skills[skill.name] = skill
+
 
 def _parse_skill_file(file_path: Path, source: str, skill_dir: str) -> SkillDefinition:
     try:
@@ -174,7 +180,9 @@ def build_skill_descriptions() -> str:
 
     if auto_only:
         lines.append("Auto-invocable skills:")
-        lines.append("When the user's request matches a skill's When to use, call the `skill` tool with that skill name before continuing. Do not ask the user to invoke it manually.")
+        lines.append(
+            "When the user's request matches a skill's When to use, call the `skill` tool with that skill name before continuing. Do not ask the user to invoke it manually."
+        )
         for s in auto_only:
             lines.append(f"- **{s.name}**: {s.description}")
             if s.when_to_use:
@@ -184,9 +192,15 @@ def build_skill_descriptions() -> str:
     lines.append("To invoke a skill programmatically, use the `skill` tool with the skill name and optional arguments.")
     lines.append("")
     lines.append("# Skill Evolution")
-    lines.append("Bear Code has an online skill evolution loop after each assistant response. Do not create or evolve skills during normal task execution unless the user explicitly asks for manual skill maintenance.")
-    lines.append("If manual maintenance is explicitly requested, call `skill_evolve` only for durable reusable feedback on an existing skill, and call `skill_create` only when no suitable existing skill exists.")
-    lines.append("Never create or evolve skills from one-off task content, private secrets, temporary project facts, or assistant-only guesses.")
+    lines.append(
+        "Bear Code has an online skill evolution loop after each assistant response. Do not create or evolve skills during normal task execution unless the user explicitly asks for manual skill maintenance."
+    )
+    lines.append(
+        "If manual maintenance is explicitly requested, call `skill_evolve` only for durable reusable feedback on an existing skill, and call `skill_create` only when no suitable existing skill exists."
+    )
+    lines.append(
+        "Never create or evolve skills from one-off task content, private secrets, temporary project facts, or assistant-only guesses."
+    )
     return "\n".join(lines)
 
 

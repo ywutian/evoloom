@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import time
-import hashlib
 from pathlib import Path
 from typing import Any
 
 from .frontmatter import format_frontmatter, parse_frontmatter
-
 
 USAGE_LOG = "usage.jsonl"
 ONLINE_PROVENANCE_LOG = "online_provenance.jsonl"
@@ -70,7 +69,9 @@ def _preview(value: object, limit: int = 500) -> str:
     return text[:limit] + "...[truncated]"
 
 
-def _compact_messages(messages: list[dict[str, Any]], *, max_messages: int = 12, max_chars: int = 4000) -> list[dict[str, str]]:
+def _compact_messages(
+    messages: list[dict[str, Any]], *, max_messages: int = 12, max_chars: int = 4000
+) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for item in list(messages or [])[-max_messages:]:
         if not isinstance(item, dict):
@@ -487,7 +488,12 @@ def _maybe_prune_stale_skill(skill_name: str, stats: dict[str, Any]) -> bool:
     min_retrieved = _parse_int(os.environ.get("BEAR_SKILL_USAGE_PRUNE_MIN_RETRIEVED"), 40)
     max_used = _parse_int(os.environ.get("BEAR_SKILL_USAGE_PRUNE_MAX_USED"), 0)
     source = str(stats.get("source") or "").strip().lower()
-    if source != "user" and os.environ.get("BEAR_SKILL_PRUNE_PROJECT", "").strip().lower() not in {"1", "true", "yes", "on"}:
+    if source != "user" and os.environ.get("BEAR_SKILL_PRUNE_PROJECT", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return False
     if int(stats.get("retrieved", 0)) < min_retrieved:
         return False
@@ -567,7 +573,9 @@ def load_skill_stats() -> dict[str, dict[str, Any]]:
     history_root = get_evolution_dir() / HISTORY_DIR
     if history_root.is_dir():
         for path in history_root.glob("*.jsonl"):
-            count = len([line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()])
+            count = len(
+                [line for line in path.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
+            )
             skill = path.stem
             item = stats.setdefault(skill, {"created": 0, "invocations": 0, "feedback": 0, "evolutions": 0})
             item["snapshots"] = count

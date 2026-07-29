@@ -200,6 +200,12 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Local runtime and IDE state
+.idea/
+.vscode/
+.bear/sessions/
+.bear/settings.json
+
 # PyPI configuration file
 .pypirc
 

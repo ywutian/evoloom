@@ -1,14 +1,11 @@
-
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from pathlib import Path
-
-from typing import Any
 import json
+from pathlib import Path
+from typing import Any
 
 SESSION_DIR = Path.home() / ".bear-code" / "sessions"
-
 
 
 def _ensure_dir() -> None:

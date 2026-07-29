@@ -12,21 +12,9 @@ from urllib.parse import urlparse
 from dotenv import find_dotenv, load_dotenv
 
 from .agent import Agent
-from .ui import (
-    print_welcome,
-    print_user_prompt,
-    print_error,
-    print_info,
-    print_plan_for_approval,
-    print_plan_approval_options,
-    print_goodbye,
-    print_interrupted,
-    print_memory_entries,
-    print_skill_entries,
-    print_warning,
-)
-from .session import load_session, get_latest_session_id
 from .memory import list_memories
+from .online_skill_eval import format_online_skill_eval_async
+from .session import get_latest_session_id, load_session
 from .skills import (
     create_skill,
     discover_skills,
@@ -36,7 +24,19 @@ from .skills import (
     record_feedback,
     skill_stats,
 )
-from .online_skill_eval import format_online_skill_eval_async
+from .ui import (
+    print_error,
+    print_goodbye,
+    print_info,
+    print_interrupted,
+    print_memory_entries,
+    print_plan_approval_options,
+    print_plan_for_approval,
+    print_skill_entries,
+    print_user_prompt,
+    print_warning,
+    print_welcome,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -291,13 +291,15 @@ async def run_repl(agent: Agent) -> None:
         if inp.startswith("/"):
             space_idx = inp.find(" ")
             cmd_name = inp[1:space_idx] if space_idx > 0 else inp[1:]
-            cmd_args = inp[space_idx + 1:] if space_idx > 0 else ""
+            cmd_args = inp[space_idx + 1 :] if space_idx > 0 else ""
             skill = get_skill_by_name(cmd_name)
             if skill and skill.user_invocable:
                 print_info(f"Invoking skill: {skill.name}")
                 try:
                     if skill.context == "fork":
-                        await agent.chat(f'Use the skill tool to invoke "{skill.name}" with args: {cmd_args or "(none)"}')
+                        await agent.chat(
+                            f'Use the skill tool to invoke "{skill.name}" with args: {cmd_args or "(none)"}'
+                        )
                     else:
                         result = execute_skill(skill.name, cmd_args)
                         if not result:
@@ -363,14 +365,14 @@ REPL commands:
   /<skill-name>       Invoke a skill (e.g. /commit "fix types")
 
 Examples:
-  mini-claude "fix the bug in src/app.ts"
-  mini-claude --yolo "run all tests and fix failures"
-  mini-claude --plan "how would you refactor this?"
-  mini-claude --max-cost 0.50 --max-turns 20 "implement feature X"
-  MODEL=deepseek-chat APIKEY=sk-xxx API=https://api.deepseek.com/anthropic mini-claude "hello"
-  MODEL=gpt-4o OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=https://aihubmix.com/v1 mini-claude "hello"
-  mini-claude --resume
-  mini-claude  # starts interactive REPL
+  bear-code "fix the bug in src/app.ts"
+  bear-code --yolo "run all tests and fix failures"
+  bear-code --plan "how would you refactor this?"
+  bear-code --max-cost 0.50 --max-turns 20 "implement feature X"
+  MODEL=deepseek-chat APIKEY=sk-xxx API=https://api.deepseek.com/anthropic bear-code "hello"
+  MODEL=gpt-4o OPENAI_API_KEY=sk-xxx OPENAI_BASE_URL=https://aihubmix.com/v1 bear-code "hello"
+  bear-code --resume
+  bear-code  # starts interactive REPL
 """)
         sys.exit(0)
 
@@ -409,10 +411,12 @@ Examples:
         if session_id:
             session = load_session(session_id)
             if session:
-                agent.restore_session({
-                    "anthropicMessages": session.get("anthropicMessages"),
-                    "openaiMessages": session.get("openaiMessages"),
-                })
+                agent.restore_session(
+                    {
+                        "anthropicMessages": session.get("anthropicMessages"),
+                        "openaiMessages": session.get("openaiMessages"),
+                    }
+                )
             else:
                 print_info("No session found to resume.")
         else:

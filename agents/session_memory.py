@@ -6,7 +6,6 @@ import json
 import re
 from typing import Any
 
-
 MAX_TRANSCRIPT_CHARS = 80_000
 MAX_BLOCK_CHARS = 12_000
 
@@ -73,11 +72,7 @@ def _content_text(content: Any) -> str:
             if btype == "text":
                 parts.append(str(block.get("text") or ""))
             elif btype == "tool_result":
-                parts.append(
-                    "TOOL_RESULT"
-                    f" id={block.get('tool_use_id', '')}\n"
-                    f"{_clip(str(block.get('content') or ''))}"
-                )
+                parts.append(f"TOOL_RESULT id={block.get('tool_use_id', '')}\n{_clip(str(block.get('content') or ''))}")
             elif btype == "tool_use":
                 parts.append(
                     "TOOL_USE"
@@ -110,10 +105,7 @@ def build_openai_transcript(messages: list[dict[str, Any]]) -> str:
                     continue
                 fn = tc.get("function") or {}
                 lines.append(
-                    "TOOL_CALL"
-                    f" id={tc.get('id', '')}"
-                    f" name={fn.get('name', '')}"
-                    f" arguments={fn.get('arguments', '')}"
+                    f"TOOL_CALL id={tc.get('id', '')} name={fn.get('name', '')} arguments={fn.get('arguments', '')}"
                 )
         if role == "tool":
             lines.append(f"tool_call_id={msg.get('tool_call_id', '')}")

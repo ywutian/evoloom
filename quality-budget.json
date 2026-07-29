@@ -1,0 +1,10 @@
+{
+  "maximum": {
+    "broad_exception_handlers": 70,
+    "max_function_lines": 255,
+    "max_function_complexity": 47
+  },
+  "minimum": {
+    "test_files": 2
+  }
+}

@@ -10,3 +10,9 @@ __pycache__
 .ruff_cache
 .DS_Store
 docs
+paper
+wiki
+tests
+.github
+.bear
+*.pdf

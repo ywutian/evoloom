@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .frontmatter import parse_frontmatter
-from .tools import tool_definitions, ToolDef
+from .tools import tool_definitions
 
 # ─── Read-only tools (for explore and plan agents) ──────────
 
@@ -124,8 +124,6 @@ def _load_agents_from_dir(directory: Path, agents: dict[str, dict]) -> None:
         except Exception:
             # 单个自定义代理文件解析失败时不影响整个程序启动或其他代理加载。
             pass
-
-
 
 
 def get_sub_agent_config(agent_type: str) -> dict:

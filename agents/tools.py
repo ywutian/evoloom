@@ -13,34 +13,18 @@ from tqdm.utils import IS_WIN
 from agents.memory import get_memory_dir
 
 ToolDef = dict  # Anthropic tool schema dict
-#权限模式
+# 权限模式
 PermissionMode = str  # "default" | "plan" | "acceptEdits" | "bypassPermissions" | "dontAsk"
 
 READ_TOOLS = {"read_file", "list_files", "grep_search", "compact_context"}
 EDIT_TOOLS = {"write_file", "edit_file", "skill_evolve", "skill_create"}
 
 
-#并发安全的工具可以并行运行（只读，无副作用）
+# 并发安全的工具可以并行运行（只读，无副作用）
 CONCURRENCY_SAFE_TOOLS = {"read_file", "list_files", "grep_search"}
 
 
-
-
-
-
-
-def get_active_tool_definitions(all_tools: list[ToolDef] | None = None) -> list[ToolDef]:
-    """过滤并返回当前可用的工具定义列表，主要用于 API 调用前剔除尚未激活的“延迟工具”（deferred tools），并删除无关的元数据字段。"""
-    tools = all_tools if all_tools is not None else tool_definitions
-    return [
-        {k: v for k, v in t.items() if k != "deferred"}
-        for t in tools
-        if not t.get("deferred") or t["name"] in _activated_tools
-    ]
-
-
-
-#工具定义
+# 工具定义
 tool_definitions: list[ToolDef] = [
     {
         "name": "read_file",
@@ -84,8 +68,14 @@ tool_definitions: list[ToolDef] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "pattern": {"type": "string", "description": 'Glob pattern to match files (e.g., "**/*.ts", "src/**/*")'},
-                "path": {"type": "string", "description": "Base directory to search from. Defaults to current directory."},
+                "pattern": {
+                    "type": "string",
+                    "description": 'Glob pattern to match files (e.g., "**/*.ts", "src/**/*")',
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Base directory to search from. Defaults to current directory.",
+                },
             },
             "required": ["pattern"],
         },
@@ -97,7 +87,10 @@ tool_definitions: list[ToolDef] = [
             "type": "object",
             "properties": {
                 "pattern": {"type": "string", "description": "The regex pattern to search for"},
-                "path": {"type": "string", "description": "Directory or file to search in. Defaults to current directory."},
+                "path": {
+                    "type": "string",
+                    "description": "Directory or file to search in. Defaults to current directory.",
+                },
                 "include": {"type": "string", "description": 'File glob pattern to include (e.g., "*.ts", "*.py")'},
             },
             "required": ["pattern"],
@@ -165,8 +158,14 @@ tool_definitions: list[ToolDef] = [
             "type": "object",
             "properties": {
                 "name": {"type": "string", "description": "Concise reusable skill name"},
-                "description": {"type": "string", "description": "One-sentence description of what the skill does and when to use it"},
-                "instructions": {"type": "string", "description": "Reusable SKILL.md body. Focus on durable method, constraints, and workflow, not one-off task content."},
+                "description": {
+                    "type": "string",
+                    "description": "One-sentence description of what the skill does and when to use it",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "Reusable SKILL.md body. Focus on durable method, constraints, and workflow, not one-off task content.",
+                },
                 "when_to_use": {"type": "string", "description": "Trigger condition for auto-invocation"},
                 "target": {
                     "type": "string",
@@ -178,9 +177,18 @@ tool_definitions: list[ToolDef] = [
                     "enum": ["inline", "fork"],
                     "description": "Skill execution mode. Defaults to inline.",
                 },
-                "user_invocable": {"type": "boolean", "description": "Whether users can invoke it manually with /<skill>. Defaults to false."},
-                "allowed_tools": {"type": "string", "description": "Optional comma-separated allowed tools for fork mode"},
-                "evidence": {"type": "string", "description": "Short user-provided evidence showing why this is reusable"},
+                "user_invocable": {
+                    "type": "boolean",
+                    "description": "Whether users can invoke it manually with /<skill>. Defaults to false.",
+                },
+                "allowed_tools": {
+                    "type": "string",
+                    "description": "Optional comma-separated allowed tools for fork mode",
+                },
+                "evidence": {
+                    "type": "string",
+                    "description": "Short user-provided evidence showing why this is reusable",
+                },
             },
             "required": ["name", "description", "instructions"],
         },
@@ -203,9 +211,16 @@ tool_definitions: list[ToolDef] = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "description": {"type": "string", "description": "Short (3-5 word) description of the sub-agent's task"},
+                "description": {
+                    "type": "string",
+                    "description": "Short (3-5 word) description of the sub-agent's task",
+                },
                 "prompt": {"type": "string", "description": "Detailed task instructions for the sub-agent"},
-                "type": {"type": "string", "enum": ["explore", "plan", "general"], "description": "Agent type. Default: general"},
+                "type": {
+                    "type": "string",
+                    "enum": ["explore", "plan", "general"],
+                    "description": "Agent type. Default: general",
+                },
             },
             "required": ["description", "prompt"],
         },
@@ -225,30 +240,35 @@ tool_definitions: list[ToolDef] = [
 ]
 
 
+# ----------------------工具调用----------------------------
 
 
+def get_workspace_root() -> Path:
+    """Return the only filesystem root exposed to model-controlled tools."""
+    configured = os.environ.get("BEAR_WORKSPACE")
+    return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
 
-#----------------------工具调用----------------------------
 
 def _resolve_tool_path(raw_path: str, *, must_exist: bool = True) -> Path:
-    path = Path(raw_path)
-    if path.exists() or not path.is_absolute():
-        return path
+    if not raw_path:
+        raise ValueError("file path is required")
 
-    parts = path.parts
-    cwd = Path.cwd()
-    for i in range(1, len(parts)):
-        candidate = cwd.joinpath(*parts[i:])
-        if must_exist and candidate.exists():
-            return candidate
-        if not must_exist and candidate.parent.exists():
-            return candidate
+    workspace = get_workspace_root()
+    requested = Path(raw_path).expanduser()
+    path = (requested if requested.is_absolute() else workspace / requested).resolve(strict=False)
 
+    try:
+        path.relative_to(workspace)
+    except ValueError as exc:
+        raise PermissionError(f"Path is outside the workspace: {raw_path}") from exc
+
+    if must_exist and not path.exists():
+        raise FileNotFoundError(f"Path does not exist: {raw_path}")
     return path
 
 
-#读取文件并且在读取文件的基础上添加行号
-def _read_file(inp:dict) -> str:
+# 读取文件并且在读取文件的基础上添加行号
+def _read_file(inp: dict) -> str:
     try:
         path = _resolve_tool_path(inp["file_path"])
         content = path.read_text(errors="replace")
@@ -258,7 +278,8 @@ def _read_file(inp:dict) -> str:
     except Exception as e:
         return f"Error reading file: {e}"
 
-def _write_file(inp:dict) -> str:
+
+def _write_file(inp: dict) -> str:
     try:
         path = _resolve_tool_path(inp["file_path"], must_exist=False)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -272,7 +293,8 @@ def _write_file(inp:dict) -> str:
     except Exception as e:
         return f"Error writing file: {e}"
 
-def _auto_update_memory_index(file_path:str) -> None:
+
+def _auto_update_memory_index(file_path: str) -> None:
     try:
         mem_dir = str(get_memory_dir())
         if file_path.startswith(mem_dir) and file_path.endswith(".md") and not file_path.endswith("MEMORY.md"):
@@ -297,15 +319,18 @@ def _auto_update_memory_index(file_path:str) -> None:
     except Exception:
         pass
 
-#-------------------------编辑助手，符号规范化+差异化------------------------
 
-#将各种Unicode引号字符统一转换为标准的ASCII直引号。
+# -------------------------编辑助手，符号规范化+差异化------------------------
+
+
+# 将各种Unicode引号字符统一转换为标准的ASCII直引号。
 def _normalize_quotes(s: str) -> str:
     s = re.sub("[\u2018\u2019\u2032]", "'", s)
-    s = re.sub('[\u201c\u201d\u2033]', '"', s)
+    s = re.sub("[\u201c\u201d\u2033]", '"', s)
     return s
 
-#查询匹配到的字符串
+
+# 查询匹配到的字符串
 def _find_actual_string(file_content: str, search_string: str) -> str | None:
     if search_string in file_content:
         return search_string
@@ -313,10 +338,11 @@ def _find_actual_string(file_content: str, search_string: str) -> str | None:
     norm_file = _normalize_quotes(file_content)
     idx = norm_file.find(norm_search)
     if idx != -1:
-        return file_content[idx:idx + len(search_string)]
+        return file_content[idx : idx + len(search_string)]
     return None
 
-#生成一个简单的文本差异格式
+
+# 生成一个简单的文本差异格式
 def _generate_diff(old_content: str, old_string: str, new_string: str) -> str:
     before_change = old_content.split(old_string)[0]
     line_num = before_change.count("\n") + 1
@@ -330,7 +356,8 @@ def _generate_diff(old_content: str, old_string: str, new_string: str) -> str:
         parts.append(f"+ {l}")
     return "\n".join(parts)
 
-#编辑文件
+
+# 编辑文件
 def _edit_file(inp: dict) -> str:
     try:
         path = _resolve_tool_path(inp["file_path"])
@@ -393,15 +420,13 @@ def _grep_search(inp: dict) -> str:
                 args.append(f"--include={include}")
             args.extend(["--", pattern, path])
 
-            result = subprocess.run(
-                args, capture_output=True, text=True, timeout=10
-            )
+            result = subprocess.run(args, capture_output=True, text=True, timeout=10)
             if result.returncode == 1:
                 return "No matches found."
             if result.returncode == 0:
                 lines = [l for l in result.stdout.split("\n") if l]
                 output = "\n".join(lines[:100])
-                if len(lines) >100:
+                if len(lines) > 100:
                     output += f"\n... and {len(lines) - 100} more matches"
                 return output
         except Exception:
@@ -435,7 +460,7 @@ def _grep_python(pattern: str, directory: str, include: str | None) -> str:
                 text = Path(full).read_text(errors="replace")
                 for i, line in enumerate(text.split("\n")):
                     if regex.search(line):
-                        matches.append(f"{full}:{i+1}:{line}")
+                        matches.append(f"{full}:{i + 1}:{line}")
                         if len(matches) >= 200:
                             return
             except Exception:
@@ -450,34 +475,25 @@ def _grep_python(pattern: str, directory: str, include: str | None) -> str:
     return output
 
 
-
-#--------截断过长的工具调用结果
+# --------截断过长的工具调用结果
 
 MAX_RESULT_CHARS = 50000
 
 
-def _truncate_result(result:str) -> str:
+def _truncate_result(result: str) -> str:
     if len(result) <= MAX_RESULT_CHARS:
         return result
     keep_each = (MAX_RESULT_CHARS - 60) // 2
-    return (
-        result[:keep_each]
-        +f"\n\n[... truncated {len(result) - keep_each * 2} chars ...]\n\n"
-        +result[-keep_each:]
-    )
+    return result[:keep_each] + f"\n\n[... truncated {len(result) - keep_each * 2} chars ...]\n\n" + result[-keep_each:]
 
 
-
-
-
-
-#----------延迟工具激活---------------------------
+# ----------延迟工具激活---------------------------
 _activated_tools: set[str] = set()
-
 
 
 def reset_activated_tools() -> None:
     _activated_tools.clear()
+
 
 def get_active_tool_definitions(all_tools: list[ToolDef] | None = None) -> list[ToolDef]:
     tools = all_tools if all_tools is not None else tool_definitions
@@ -487,11 +503,13 @@ def get_active_tool_definitions(all_tools: list[ToolDef] | None = None) -> list[
         if not t.get("deferred") or t["name"] in _activated_tools
     ]
 
+
 def get_deferred_tool_names(all_tools: list[ToolDef] | None = None) -> list[str]:
     tools = all_tools if all_tools is not None else tool_definitions
     return [t["name"] for t in tools if t.get("deferred") and t["name"] not in _activated_tools]
 
-#执行shell命令
+
+# 执行shell命令
 def _run_shell(inp: dict) -> str:
     try:
         timeout_ms = inp.get("timeout", 30000)
@@ -502,6 +520,7 @@ def _run_shell(inp: dict) -> str:
             capture_output=True,
             text=True,
             timeout=timeout_s,
+            cwd=get_workspace_root(),
         )
         output = result.stdout or ""
         if result.returncode != 0:
@@ -515,11 +534,11 @@ def _run_shell(inp: dict) -> str:
         return f"Error: {e}"
 
 
-#危险命令检测模式列表
+# 危险命令检测模式列表
 
 DANGEROUS_PATTERNS = [
     re.compile(r"\brm\s"),
-    re.compile(r"\bgit\s+(push|reset|clean|checkout\s+\.)"),
+    re.compile(r"\bgit\s+(push|reset|clean|checkout\s+\.|commit|merge|rebase)"),
     re.compile(r"\bsudo\b"),
     re.compile(r"\bmkfs\b"),
     re.compile(r"\bdd\s"),
@@ -534,16 +553,24 @@ DANGEROUS_PATTERNS = [
     re.compile(r"\btaskkill\s", re.IGNORECASE),
     re.compile(r"\bRemove-Item\s", re.IGNORECASE),
     re.compile(r"\bStop-Process\s", re.IGNORECASE),
+    re.compile(r"\b(chmod|chown|mv)\b"),
+    re.compile(r"(^|[;&|]\s*):?\s*>+\s*[^&]"),
+    re.compile(r"\b(curl|wget)\b.*\|\s*(sh|bash|zsh)\b"),
+    re.compile(r"\b(shutil\.rmtree|os\.remove|os\.unlink)\b"),
 ]
+
+
 def is_dangerous(command: str) -> bool:
     return any(p.search(command) for p in DANGEROUS_PATTERNS)
 
-#权限规则
+
+# 权限规则
 def _parse_rule(rule: str) -> dict:
     m = re.match(r"^([a-z_]+)\((.+)\)$", rule)
     if m:
         return {"tool": m.group(1), "pattern": m.group(2)}
     return {"tool": rule, "pattern": None}
+
 
 def _load_settings(file_path: Path) -> dict | None:
     if not file_path.exists():
@@ -553,8 +580,8 @@ def _load_settings(file_path: Path) -> dict | None:
     except Exception:
         return None
 
-_cached_rules: dict | None = None
 
+_cached_rules: dict | None = None
 
 
 def load_permission_rules() -> dict:
@@ -622,6 +649,14 @@ def check_permission(
     if mode == "bypassPermissions":
         return {"action": "allow"}
 
+    path_value = inp.get("file_path") or inp.get("path")
+    file_tools = {"read_file", "write_file", "edit_file", "list_files", "grep_search"}
+    if path_value and tool_name in file_tools:
+        try:
+            _resolve_tool_path(path_value, must_exist=tool_name != "write_file")
+        except (ValueError, FileNotFoundError, PermissionError) as exc:
+            return {"action": "deny", "message": str(exc)}
+
     rule_result = _check_permission_rules(tool_name, inp)
     if rule_result == "deny":
         return {"action": "deny", "message": f"Denied by permission rule for {tool_name}"}
@@ -649,7 +684,9 @@ def check_permission(
     needs_confirm = False
     confirm_message = ""
 
-    if tool_name == "run_shell" and is_dangerous(inp.get("command", "")):
+    # Shell commands are arbitrary code. Default to explicit consent; settings
+    # rules can still allow known-safe commands and dontAsk remains fail-closed.
+    if tool_name == "run_shell":
         needs_confirm = True
         confirm_message = inp.get("command", "")
     elif tool_name == "write_file" and not _resolve_tool_path(inp.get("file_path", ""), must_exist=False).exists():
@@ -673,22 +710,17 @@ def check_permission(
     return {"action": "allow"}
 
 
-
-
-
-
-#----------------执行工具调用-----------------------
+# ----------------执行工具调用-----------------------
 # 'agent' 和 'skill' 这两个工具在 agent.py 中处理，以避免循环依赖。"
 
-async def execute_tool(
-    name: str, inp: dict, read_file_state: dict[str, float] | None = None
-) -> str:
+
+async def execute_tool(name: str, inp: dict, read_file_state: dict[str, float] | None = None) -> str:
     if name == "read_file":
         result = _read_file(inp)
         if read_file_state is not None and not result.startswith("Error"):
             abs_path = str(_resolve_tool_path(inp["file_path"]).resolve())
             try:
-                read_file_state[abs_path] =  os.path.getmtime(abs_path)
+                read_file_state[abs_path] = os.path.getmtime(abs_path)
             except OSError:
                 pass
         return _truncate_result(result)
@@ -703,14 +735,11 @@ async def execute_tool(
                 verb = "writing" if name == "write_file" else "editing"
                 return f"Warning: {inp['file_path']} was modified externally since your last read. Please read_file again before {verb}."
 
-    #搜索和激活延迟加载的工具。
+    # 搜索和激活延迟加载的工具。
     if name == "tool_search":
         query = (inp.get("query") or "").lower()
         deferred = [t for t in tool_definitions if t.get("deferred")]
-        matches = [
-            t for t in deferred
-            if query in t["name"].lower() or query in (t.get("description") or "").lower()
-        ]
+        matches = [t for t in deferred if query in t["name"].lower() or query in (t.get("description") or "").lower()]
         if not matches:
             return "No matching deferred tools found."
 
@@ -718,8 +747,10 @@ async def execute_tool(
             _activated_tools.add(m["name"])
 
         return json.dumps(
-            [{"name": t["name"], "description": t.get("description", ""), "input_schema": t["input_schema"]} for t in
-             matches],
+            [
+                {"name": t["name"], "description": t.get("description", ""), "input_schema": t["input_schema"]}
+                for t in matches
+            ],
             indent=2,
         )
     if name == "skill_evolve":
@@ -774,10 +805,6 @@ async def execute_tool(
     return result
 
 
-
 def reset_permission_cache() -> None:
     global _cached_rules
     _cached_rules = None
-
-
-

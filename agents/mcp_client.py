@@ -37,15 +37,15 @@ from typing import Any
 
 from .ui import print_error, print_info
 
-
 # ─── 单个 MCP 连接：一个 McpConnection 对应一个 MCP Server 子进程 ──────────────────
 
 
 class McpConnection:
     """管理单个 MCP Server 子进程，以及和它之间的 JSON-RPC 通信。"""
 
-    def __init__(self, server_name: str, command: str, args: list[str] | None = None,
-                 env: dict[str, str] | None = None):
+    def __init__(
+        self, server_name: str, command: str, args: list[str] | None = None, env: dict[str, str] | None = None
+    ):
         # MCP Server 在配置中的名称，用于后续生成工具名前缀和路由工具调用。
         self.server_name = server_name
         # 启动 MCP Server 的命令，例如 `node`、`python`、某个可执行文件路径等。
@@ -72,7 +72,8 @@ class McpConnection:
         # - stdout：Server 向客户端返回 JSON-RPC 响应。
         # - stderr：保留错误输出管道，避免 Server 继承当前终端输出。
         self._process = await asyncio.create_subprocess_exec(
-            self.command, *self.args,
+            self.command,
+            *self.args,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -103,9 +104,7 @@ class McpConnection:
                 if "error" in msg:
                     # Server 返回 JSON-RPC error 时，把等待中的 Future 标记为异常。
                     e = msg["error"]
-                    fut.set_exception(
-                        RuntimeError(f"MCP error {e.get('code')}: {e.get('message')}")
-                    )
+                    fut.set_exception(RuntimeError(f"MCP error {e.get('code')}: {e.get('message')}"))
                 else:
                     # 正常响应只把 result 部分交给调用方。
                     fut.set_result(msg.get("result"))
@@ -145,11 +144,14 @@ class McpConnection:
     async def initialize(self) -> None:
         """执行 MCP 初始化握手。"""
         # initialize 是 MCP 连接建立后的第一步，用于协商协议版本和客户端信息。
-        await self._send_request("initialize", {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "mini-claude", "version": "1.0.0"},
-        })
+        await self._send_request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "mini-claude", "version": "1.0.0"},
+            },
+        )
         # 初始化请求成功后，按 MCP 协议发送 initialized 通知。
         self._send_notification("notifications/initialized")
 
@@ -174,9 +176,7 @@ class McpConnection:
         result = await self._send_request("tools/call", {"name": name, "arguments": args})
         if isinstance(result, dict) and isinstance(result.get("content"), list):
             # MCP 工具结果通常是 content block 列表。当前 Agent 只消费 text block。
-            return "\n".join(
-                c["text"] for c in result["content"] if c.get("type") == "text"
-            )
+            return "\n".join(c["text"] for c in result["content"] if c.get("type") == "text")
         # 如果不是标准 content list，就退回为 JSON 字符串，避免丢失信息。
         return json.dumps(result)
 

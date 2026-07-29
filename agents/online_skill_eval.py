@@ -15,7 +15,6 @@ from .skill_evolution import (
     load_skill_stats,
 )
 
-
 DEFAULT_MIN_REPLAY_SAMPLES = 2
 DEFAULT_MIN_PROMOTION_TESTS = 1
 DEFAULT_MIN_RETRIEVED = 5
@@ -212,7 +211,18 @@ def _compile_eval_rules(skill: dict[str, Any], *, include_llm_rules: bool = Fals
             }
         )
 
-    if any(key in low for key in ("引用来源", "标注来源", "注明来源", "cite sources", "with sources", "provide sources", "source-backed")):
+    if any(
+        key in low
+        for key in (
+            "引用来源",
+            "标注来源",
+            "注明来源",
+            "cite sources",
+            "with sources",
+            "provide sources",
+            "source-backed",
+        )
+    ):
         rules.append(
             {
                 "rule_id": "must_cite_sources",
@@ -237,7 +247,10 @@ def _compile_eval_rules(skill: dict[str, Any], *, include_llm_rules: bool = Fals
             }
         )
 
-    if any(key in low for key in ("先给结论", "结论在前", "先说结论", "answer first", "lead with the conclusion", "bottom line first")):
+    if any(
+        key in low
+        for key in ("先给结论", "结论在前", "先说结论", "answer first", "lead with the conclusion", "bottom line first")
+    ):
         rules.append(
             {
                 "rule_id": "lead_with_conclusion",
@@ -298,7 +311,10 @@ def _compile_eval_rules(skill: dict[str, Any], *, include_llm_rules: bool = Fals
                 "provenance": {"source": "skill_text"},
             }
         )
-    elif any(key in low for key in ("不要幻觉", "不要编造", "不确定就说", "do not hallucinate", "avoid hallucination", "if unsure")):
+    elif any(
+        key in low
+        for key in ("不要幻觉", "不要编造", "不确定就说", "do not hallucinate", "avoid hallucination", "if unsure")
+    ):
         rules.append(
             {
                 "rule_id": "uncertainty_marked",
@@ -619,7 +635,9 @@ def _freeze_replay_pool(*, skill_name: str, samples: list[dict[str, Any]]) -> li
         else:
             by_id[sample_id] = dict(item)
 
-    frozen = sorted(by_id.values(), key=lambda item: (str(item.get("time") or ""), str(item.get("sample_id") or "")), reverse=True)
+    frozen = sorted(
+        by_id.values(), key=lambda item: (str(item.get("time") or ""), str(item.get("sample_id") or "")), reverse=True
+    )
     frozen = _assign_replay_splits(frozen)
     _write_jsonl(path, frozen)
     return frozen
@@ -767,7 +785,11 @@ def _build_heuristic_candidate_variants(
     rule_lookup = _rule_by_id(rules)
     failures = rule_summary.get("failures") if isinstance(rule_summary.get("failures"), list) else []
     if not failures:
-        failures = [{"rule_id": str(rule.get("rule_id") or "")} for rule in rules if str(rule.get("kind") or "") != "programmatic"][:2]
+        failures = [
+            {"rule_id": str(rule.get("rule_id") or "")}
+            for rule in rules
+            if str(rule.get("kind") or "") != "programmatic"
+        ][:2]
     variants: list[dict[str, Any]] = []
     seen_labels: set[str] = set()
     base_instructions = str(snapshot.get("instructions") or "")
@@ -795,7 +817,9 @@ def _build_heuristic_candidate_variants(
         elif rid == "no_unfounded_claims":
             additions.append("Do not invent facts; if evidence is missing, state uncertainty explicitly.")
         elif rid == "skill_instruction_alignment":
-            additions.append("Satisfy the Skill's observable requirements before adding extra clarifications or commentary.")
+            additions.append(
+                "Satisfy the Skill's observable requirements before adding extra clarifications or commentary."
+            )
         else:
             requirement = str((rule.get("params") or {}).get("requirement_text") or "").strip()
             if requirement:
@@ -1013,7 +1037,9 @@ async def _build_candidate_eval_bundle_async(
         )
         outputs.extend(variant_outputs)
         judgments.extend(variant_outcomes)
-        scored.append((variant, variant_summary, _variant_summary_from_eval(variant, variant_summary, len(dev_samples))))
+        scored.append(
+            (variant, variant_summary, _variant_summary_from_eval(variant, variant_summary, len(dev_samples)))
+        )
     if not scored:
         return {}
     scored.sort(
@@ -1208,10 +1234,7 @@ def _promotion_decision(
     champion_score = float(previous_summary.get("average_score", 0.0) or 0.0)
     candidate_hard = int(candidate.get("hard_failures", 0) or 0)
     champion_hard = int(previous_summary.get("hard_failures", 0) or 0)
-    promoted = bool(
-        candidate_score >= champion_score + float(min_score_delta)
-        and candidate_hard <= champion_hard
-    )
+    promoted = bool(candidate_score >= champion_score + float(min_score_delta) and candidate_hard <= champion_hard)
     return {
         "promoted": promoted,
         "status": "active_champion" if promoted else "rejected",
@@ -1320,7 +1343,9 @@ def _persist_eval_artifacts(
     )
     if best_variant and best_test_summary and candidate_beats_current:
         promotion_candidate = dict(best_test_summary)
-        promotion_snapshot = best_variant.get("snapshot") if isinstance(best_variant.get("snapshot"), dict) else snapshot
+        promotion_snapshot = (
+            best_variant.get("snapshot") if isinstance(best_variant.get("snapshot"), dict) else snapshot
+        )
     champion_before = _load_champion(lineage_id)
     promotion = _promotion_decision(
         status=status,
@@ -1348,11 +1373,7 @@ def _persist_eval_artifacts(
         "reasons": reasons,
         "candidate": candidate_summary,
         "candidate_variants": [
-            {
-                key: value
-                for key, value in dict(variant).items()
-                if key != "snapshot"
-            }
+            {key: value for key, value in dict(variant).items() if key != "snapshot"}
             for variant in list(bundle.get("candidate_variants") or [])
             if isinstance(variant, dict)
         ],
@@ -1482,9 +1503,7 @@ async def _evaluate_online_skill_evolution_core(
             min_relevance_rate=min_relevance_rate,
             min_rule_pass_rate=min_rule_pass_rate,
         )
-        current_version = (
-            lineage.get("current_version", lifecycle.get("version", ""))
-        )
+        current_version = lineage.get("current_version", lifecycle.get("version", ""))
         snapshot["version"] = str(current_version or "")
         candidate_bundle = await _build_candidate_eval_bundle_async(
             lineage_id=_lineage_id_for_skill(name),
@@ -1533,13 +1552,21 @@ async def _evaluate_online_skill_evolution_core(
                     "count": len(replay_pool),
                     "mutate_dev": sum(1 for item in replay_pool if item.get("split") == "mutate_dev"),
                     "promotion_test": promotion_test_count,
-                    "sources": sorted({str(item.get("source_type") or "") for item in replay_pool if item.get("source_type")}),
+                    "sources": sorted(
+                        {str(item.get("source_type") or "") for item in replay_pool if item.get("source_type")}
+                    ),
                 },
                 "eval": public_rule_summary,
                 "candidate_eval": {
-                    "candidate_count": len(list(candidate_bundle.get("candidate_variants") or [])) if isinstance(candidate_bundle, dict) else 0,
-                    "best_candidate": dict(candidate_bundle.get("best_dev_summary") or {}) if isinstance(candidate_bundle, dict) else {},
-                    "has_promotion_test_eval": bool((candidate_bundle or {}).get("best_test_summary")) if isinstance(candidate_bundle, dict) else False,
+                    "candidate_count": len(list(candidate_bundle.get("candidate_variants") or []))
+                    if isinstance(candidate_bundle, dict)
+                    else 0,
+                    "best_candidate": dict(candidate_bundle.get("best_dev_summary") or {})
+                    if isinstance(candidate_bundle, dict)
+                    else {},
+                    "has_promotion_test_eval": bool((candidate_bundle or {}).get("best_test_summary"))
+                    if isinstance(candidate_bundle, dict)
+                    else False,
                 },
                 "artifacts": artifacts,
                 "file": lifecycle.get("file", ""),
@@ -1567,7 +1594,9 @@ async def _evaluate_online_skill_evolution_core(
         eval_data = item.get("eval") if isinstance(item.get("eval"), dict) else {}
         total_replay += int(replay.get("count", 0) or 0)
         total_rule_outcomes += int(eval_data.get("outcome_count", 0) or 0)
-        total_rule_passed += round(float(eval_data.get("pass_rate", 0.0) or 0.0) * int(eval_data.get("outcome_count", 0) or 0))
+        total_rule_passed += round(
+            float(eval_data.get("pass_rate", 0.0) or 0.0) * int(eval_data.get("outcome_count", 0) or 0)
+        )
         total_llm_rules += int(eval_data.get("llm_rule_count", 0) or 0)
         llm_outcome_count = int(eval_data.get("llm_outcome_count", 0) or 0)
         total_llm_rule_outcomes += llm_outcome_count
@@ -1624,7 +1653,9 @@ async def _evaluate_online_skill_evolution_core(
     if write_report:
         report_path = root / "online_eval_report.json"
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
         report["report_file"] = str(report_path)
     return report
 
@@ -1711,7 +1742,9 @@ def format_online_skill_eval(report: dict[str, Any] | None = None) -> str:
     aggregate = report.get("aggregate") if isinstance(report.get("aggregate"), dict) else {}
     actions = aggregate.get("actions") if isinstance(aggregate.get("actions"), dict) else {}
     statuses = aggregate.get("statuses") if isinstance(aggregate.get("statuses"), dict) else {}
-    champion_statuses = aggregate.get("champion_statuses") if isinstance(aggregate.get("champion_statuses"), dict) else {}
+    champion_statuses = (
+        aggregate.get("champion_statuses") if isinstance(aggregate.get("champion_statuses"), dict) else {}
+    )
     llm_judge = report.get("llm_judge") if isinstance(report.get("llm_judge"), dict) else {}
     llm_enabled = bool(llm_judge.get("enabled"))
 
@@ -1742,7 +1775,9 @@ def format_online_skill_eval(report: dict[str, Any] | None = None) -> str:
     if statuses:
         lines.append("  statuses: " + ", ".join(f"{key}={statuses[key]}" for key in sorted(statuses)))
     if champion_statuses:
-        lines.append("  champion_statuses: " + ", ".join(f"{key}={champion_statuses[key]}" for key in sorted(champion_statuses)))
+        lines.append(
+            "  champion_statuses: " + ", ".join(f"{key}={champion_statuses[key]}" for key in sorted(champion_statuses))
+        )
 
     skills = report.get("skills") if isinstance(report.get("skills"), list) else []
     if not skills:
@@ -1762,7 +1797,9 @@ def format_online_skill_eval(report: dict[str, Any] | None = None) -> str:
             replay = item.get("replay") if isinstance(item.get("replay"), dict) else {}
             eval_data = item.get("eval") if isinstance(item.get("eval"), dict) else {}
             candidate_eval = item.get("candidate_eval") if isinstance(item.get("candidate_eval"), dict) else {}
-            best_candidate = candidate_eval.get("best_candidate") if isinstance(candidate_eval.get("best_candidate"), dict) else {}
+            best_candidate = (
+                candidate_eval.get("best_candidate") if isinstance(candidate_eval.get("best_candidate"), dict) else {}
+            )
             artifacts = item.get("artifacts") if isinstance(item.get("artifacts"), dict) else {}
             promotion = artifacts.get("promotion") if isinstance(artifacts.get("promotion"), dict) else {}
             reasons = "; ".join(str(reason) for reason in item.get("reasons", []) if str(reason).strip())

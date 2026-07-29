@@ -1,46 +1,27 @@
-FROM python:3.11-slim
+FROM python:3.12.12-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    BEAR_WORKSPACE=/workspace \
+    HOME=/home/bear
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        bash \
-        ca-certificates \
-        curl \
-        git \
-        gnupg \
-        grep \
-        ripgrep \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN mkdir -p /etc/apt/keyrings \
-    && curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg \
-    && echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends nodejs \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update \
-    && npx -y playwright@latest install --with-deps chromium \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends git ripgrep \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 --shell /bin/bash bear
 
 WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock.txt pyproject.toml README.md ./
+RUN pip install --no-cache-dir -r requirements.lock.txt
 
 COPY agents ./agents
-COPY README.md .
+RUN pip install --no-cache-dir --no-deps . \
+    && mkdir -p /workspace /home/bear/.bear-code /home/bear/.bear \
+    && chown -R bear:bear /workspace /home/bear
 
-RUN mkdir -p /workspace
-COPY .mcp.json /workspace/.mcp.json
-
+USER bear
 WORKDIR /workspace
 
-ENTRYPOINT ["python", "-m", "agents.main"]
+ENTRYPOINT ["bear-code"]
+CMD ["--help"]

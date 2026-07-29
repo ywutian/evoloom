@@ -9,14 +9,15 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Callable, Awaitable, Any
+from typing import Any, Awaitable, Callable
 
 import anthropic
 import openai
 
 from agents.mcp_client import McpManager
-from agents.memory import MemoryPrefetch, start_memory_prefetch, format_memories_for_injection
+from agents.memory import MemoryPrefetch, format_memories_for_injection, start_memory_prefetch
 from agents.prompt import build_system_prompt
+from agents.session import save_folded_session_memory, save_session
 from agents.session_memory import (
     FOLD_SESSION_MEMORY_SYSTEM,
     build_anthropic_transcript,
@@ -26,14 +27,30 @@ from agents.session_memory import (
     format_folded_memory,
     parse_folded_memory,
 )
-from agents.session import save_folded_session_memory, save_session
 from agents.subagent import get_sub_agent_config
-from agents.tools import ToolDef, tool_definitions, execute_tool, CONCURRENCY_SAFE_TOOLS, check_permission, \
-    get_active_tool_definitions
-from agents.ui import print_info, print_divider, print_assistant_text, print_sub_agent_start, print_sub_agent_end, \
-    start_spinner, stop_spinner, print_cost, print_tool_call, print_tool_result, print_confirmation, print_retry, \
-    print_error
-
+from agents.tools import (
+    CONCURRENCY_SAFE_TOOLS,
+    ToolDef,
+    check_permission,
+    execute_tool,
+    get_active_tool_definitions,
+    tool_definitions,
+)
+from agents.ui import (
+    print_assistant_text,
+    print_confirmation,
+    print_cost,
+    print_divider,
+    print_error,
+    print_info,
+    print_retry,
+    print_sub_agent_end,
+    print_sub_agent_start,
+    print_tool_call,
+    print_tool_result,
+    start_spinner,
+    stop_spinner,
+)
 
 # 指数退避重试
 
@@ -60,10 +77,7 @@ def _sanitize_for_utf8(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(_sanitize_for_utf8(item) for item in value)
     if isinstance(value, dict):
-        return {
-            _sanitize_for_utf8(key): _sanitize_for_utf8(item)
-            for key, item in value.items()
-        }
+        return {_sanitize_for_utf8(key): _sanitize_for_utf8(item) for key, item in value.items()}
     return value
 
 
@@ -74,11 +88,12 @@ async def _with_retry(fn, max_retries: int = 3):
         except Exception as error:
             if attempt >= max_retries or not _is_retryable(error):
                 raise
-            delay = min(1000 * (2 ** attempt), 30000) / 1000 + (hash(str(time.time())) % 1000) / 1000
+            delay = min(1000 * (2**attempt), 30000) / 1000 + (hash(str(time.time())) % 1000) / 1000
             status = getattr(error, "status_code", None) or getattr(error, "status", None)
             reason = f"HTTP {status}" if status else (getattr(error, "code", None) or "network error")
             print_retry(attempt + 1, max_retries, reason)
             await asyncio.sleep(delay)
+
 
 MODEL_CONTEXT = {
     "claude-opus-4-6": 200000,
@@ -88,14 +103,15 @@ MODEL_CONTEXT = {
     "claude-opus-4-20250514": 200000,
     "gpt-4o": 128000,
     "gpt-4o-mini": 128000,
-    "deepseek-chat":200000
+    "deepseek-chat": 200000,
 }
 
-def _get_context_windows(model:str)->int:
+
+def _get_context_windows(model: str) -> int:
     return MODEL_CONTEXT.get(model, 200000)
 
 
-#多层级压缩常数
+# 多层级压缩常数
 SNIP_THRESHOLD = 0.60
 AUTO_COMPACT_THRESHOLD = 0.70
 SNIP_PLACEHOLDER = "[Content snipped - re-read if needed]"
@@ -103,7 +119,6 @@ SNIPPABLE_TOOLS = {"read_file", "grep_search", "list_files", "run_shell"}
 MICROCOMPACT_IDLE_S = 5 * 60  # 5 minutes
 
 KEEP_RECENT_RESULTS = 3
-
 
 
 def _get_max_output_tokens(model: str) -> int:
@@ -116,7 +131,8 @@ def _get_max_output_tokens(model: str) -> int:
         return 32000
     return 16384
 
-#转换tool的形式到openai
+
+# 转换tool的形式到openai
 def _to_openai_tools(tools: list[ToolDef]) -> list[dict]:
     return [
         {
@@ -132,20 +148,22 @@ def _to_openai_tools(tools: list[ToolDef]) -> list[dict]:
 
 
 class Agent:
-    def __init__(self,
-                 *,
-                 permission_mode:str="default",
-                 model:str="deepseek-chat",
-                 api_base: str | None=None,
-                 anthropic_base_url: str | None=None,
-                 api_key: str | None=None,
-                 thinking: bool=False,
-                 max_cost_usd: float | None=None,
-                 max_turns: int | None=None,
-                 confirm_fn:Callable[[str], Awaitable[bool]] | None=None,
-                 custom_system_prompt: str | None=None,
-                 custom_tools: list[ToolDef] | None=None,
-                 is_sub_agent: bool=False,):
+    def __init__(
+        self,
+        *,
+        permission_mode: str = "default",
+        model: str = "deepseek-chat",
+        api_base: str | None = None,
+        anthropic_base_url: str | None = None,
+        api_key: str | None = None,
+        thinking: bool = False,
+        max_cost_usd: float | None = None,
+        max_turns: int | None = None,
+        confirm_fn: Callable[[str], Awaitable[bool]] | None = None,
+        custom_system_prompt: str | None = None,
+        custom_tools: list[ToolDef] | None = None,
+        is_sub_agent: bool = False,
+    ):
         self.permission_mode = permission_mode
         self.thinking = thinking
         self.model = model
@@ -156,9 +174,9 @@ class Agent:
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
         self._custom_system_prompt = custom_system_prompt
-        self.effective_window=_get_context_windows(model) -20000
+        self.effective_window = _get_context_windows(model) - 20000
         self.session_id = uuid.uuid4().hex[:8]
-        self.session_start_time= time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime())
+        self.session_start_time = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
         self.total_input_tokens = 0
         self.total_output_tokens = 0
@@ -166,41 +184,39 @@ class Agent:
         self.current_turns = 0
         self.last_api_call_time = 0
 
-
         self._aborted = False
-        #存储异步任务
-        self._current_task:asyncio.Task | None = None
-        #权限白名单
+        # 存储异步任务
+        self._current_task: asyncio.Task | None = None
+        # 权限白名单
         self._confirmed_paths: set[str] = set()
 
-
         # 计划模式”（Plan Mode）状态的变量
-        self._pre_plan_mode: str | None=None
-        self._plan_file_path: str | None=None
-        self._plan_approval_fn : Callable[[str], Awaitable[bool]] | None=None
-        self._context_cleared : bool=False
+        self._pre_plan_mode: str | None = None
+        self._plan_file_path: str | None = None
+        self._plan_approval_fn: Callable[[str], Awaitable[bool]] | None = None
+        self._context_cleared: bool = False
 
-        #思考模式
+        # 思考模式
         self._thinking_mode = self._resolve_thinking_mode()
 
-        #子agent的输出缓存
-        self._output_buffer: list[str] | None=None
+        # 子agent的输出缓存
+        self._output_buffer: list[str] | None = None
         self._turn_output_buffer: list[str] | None = None
 
         # 编辑前读取
-        self._read_file_state: dict[str, float] ={}
+        self._read_file_state: dict[str, float] = {}
 
-        #MCP集成
+        # MCP集成
         self._mcp_manager = McpManager()
         self._mcp_initialized = False
 
-        #记忆回溯
-        #记忆agent已经回答过的信息
+        # 记忆回溯
+        # 记忆agent已经回答过的信息
         self._already_surfaced_memories: set[str] = set()
-        #当前会话占用的字节数
+        # 当前会话占用的字节数
         self._session_memory_bytes = 0
 
-        #区分message的历史消息
+        # 区分message的历史消息
         self._anthropic_messages: list[str] = []
         self._openai_messages: list[str] = []
         self._last_retrieved_skill_reference: dict[str, Any] | None = None
@@ -214,7 +230,7 @@ class Agent:
         self._same_tool_repeat_count: int = 0
         self._last_tool_name: str = ""
 
-        #构建系统提示词
+        # 构建系统提示词
         self._base_system_prompt = custom_system_prompt or build_system_prompt()
 
         if self.permission_mode == "plan":
@@ -223,13 +239,13 @@ class Agent:
         else:
             self._system_prompt = self._base_system_prompt
 
-        #初始化大模型客户端
+        # 初始化大模型客户端
         if self.use_openai:
             self._openai_client = openai.AsyncOpenAI(base_url=api_base, api_key=api_key)
             self._anthropic_client = None
             self._openai_messages.append({"role": "system", "content": self._system_prompt})
         else:
-            kwargs : dict[str,Any] = {}
+            kwargs: dict[str, Any] = {}
             if api_key:
                 kwargs["api_key"] = api_key
             if anthropic_base_url:
@@ -239,7 +255,7 @@ class Agent:
 
         self._refresh_runtime_system_prompt()
 
-    #判断返回模型的思考模式
+    # 判断返回模型的思考模式
     def _resolve_thinking_mode(self) -> str:
         if not self.thinking:
             return "disabled"
@@ -257,11 +273,12 @@ class Agent:
         if "claude" in m and any(x in m for x in ("opus", "sonnet", "haiku")):
             return True
         return False
+
     def _model_supports_adaptive_thinking(self) -> bool:
         m = self.model.lower()
         return "opus-4-6" in m or "sonnet-4-6" in m
 
-    #生成一个用于保存 AI 计划（Plan）的 Markdown 文件的绝对路径。
+    # 生成一个用于保存 AI 计划（Plan）的 Markdown 文件的绝对路径。
     def _generate_plan_file_path(self) -> str:
         d = Path.home() / ".bear" / "plans"
         d.mkdir(parents=True, exist_ok=True)
@@ -288,21 +305,24 @@ class Agent:
 
     IMPORTANT: When your plan is complete, you MUST call exit_plan_mode. Do NOT ask the user to approve — exit_plan_mode handles that."""
 
-    #判断当前的任务所有的任务是否完成
+    # 判断当前的任务所有的任务是否完成
     @property
-    def is_processing(self)->bool:
+    def is_processing(self) -> bool:
         return self._current_task is not None and not self._current_task.done()
 
-    #大模型调用的工厂方法,构建一个用于记忆召回（memory recall）的 sideQuery 可调用对象，兼容anthropic, openai。
+    # 大模型调用的工厂方法,构建一个用于记忆召回（memory recall）的 sideQuery 可调用对象，兼容anthropic, openai。
     def _build_side_query(self, *, max_tokens: int = 256):
         if self._anthropic_client:
             client = self._anthropic_client
             model = self.model
-            async def _sq(system:str, user_message:str)->str:
+
+            async def _sq(system: str, user_message: str) -> str:
 
                 resp = await client.messages.create(
-                    model=model, max_tokens=max(1, int(max_tokens)), system=system,
-                messages=[{"role": "user", "content": user_message}],
+                    model=model,
+                    max_tokens=max(1, int(max_tokens)),
+                    system=system,
+                    messages=[{"role": "user", "content": user_message}],
                 )
                 text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
                 if not text.strip():
@@ -314,11 +334,13 @@ class Agent:
                         block_types,
                     )
                 return text
+
             return _sq
         if self._openai_client:
             client = self._openai_client
             model = self.model
-            async def _sq_openai(system:str, user_message:str)->str:
+
+            async def _sq_openai(system: str, user_message: str) -> str:
                 resp = await client.chat.completions.create(
                     model=model,
                     max_tokens=max(1, int(max_tokens)),
@@ -326,7 +348,6 @@ class Agent:
                         {"role": "system", "content": system},
                         {"role": "user", "content": user_message},
                     ],
-
                 )
                 if not resp.choices:
                     logging.warning("side_query returned no OpenAI-compatible choices: model=%s", model)
@@ -341,38 +362,39 @@ class Agent:
                         choice.message,
                     )
                 return content
+
             return _sq_openai
         return None
-    #异步任务取消（Abort）
+
+    # 异步任务取消（Abort）
     def abort(self) -> None:
         self._aborted = True
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
 
-    def set_confirm_fn(self, fn:Callable[[str], Awaitable[bool]]) -> None:
+    def set_confirm_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self.confirm_fn = fn
 
-    def set_plan_approval_fn(self, fn:Callable[[str], Awaitable[bool]]) -> None:
+    def set_plan_approval_fn(self, fn: Callable[[str], Awaitable[bool]]) -> None:
         self._plan_approval_fn = fn
 
-
-    #计划模式开关（“状态切换与现场保护”机制）
+    # 计划模式开关（“状态切换与现场保护”机制）
     def toggle_plan_mode(self) -> str:
         """
-               1. 退出计划模式（从 plan 切回原模式）
-               当当前模式已经是 plan 时，执行 if 分支：
-               恢复之前的状态：self.permission_mode = self._pre_plan_mode or "default"。
-                   在进入计划模式时，程序会把原本的模式保存在 _pre_plan_mode 里。退出时，就把它重新拿出来赋值回去，恢复到切换前的状态。
-               清理计划模式的痕迹：把 _pre_plan_mode 和 _plan_file_path（计划文件路径）清空，并将系统提示词 _system_prompt 恢复为最基础的 _base_system_prompt。
-               同步 OpenAI 消息：如果底层使用的是 OpenAI 接口，它还会同步更新消息列表里的第一条系统提示词，确保 AI 的上下文也跟着切换回来。
-               反馈返回：打印退出提示，并返回恢复后的模式名称。
+                1. 退出计划模式（从 plan 切回原模式）
+                当当前模式已经是 plan 时，执行 if 分支：
+                恢复之前的状态：self.permission_mode = self._pre_plan_mode or "default"。
+                    在进入计划模式时，程序会把原本的模式保存在 _pre_plan_mode 里。退出时，就把它重新拿出来赋值回去，恢复到切换前的状态。
+                清理计划模式的痕迹：把 _pre_plan_mode 和 _plan_file_path（计划文件路径）清空，并将系统提示词 _system_prompt 恢复为最基础的 _base_system_prompt。
+                同步 OpenAI 消息：如果底层使用的是 OpenAI 接口，它还会同步更新消息列表里的第一条系统提示词，确保 AI 的上下文也跟着切换回来。
+                反馈返回：打印退出提示，并返回恢复后的模式名称。
 
-               2. 进入计划模式（从其他模式切入 plan）
-       当当前模式不是 plan 时，执行 else 分支：
-       保护当前现场：self._pre_plan_mode = self.permission_mode。先把当前正在使用的模式（比如正常模式或自动接受模式）暂存起来，方便以后能原路返回。
-       切换并初始化：将当前模式设为 "plan"，生成一个专属的计划文件路径，并扩展系统提示词。通过拼接 _build_plan_mode_prompt()，给 AI 注入“只动脑不动手、输出结构化计划”的专属指令。
-       同步 OpenAI 消息：同样地，如果使用 OpenAI，也会实时更新上下文里的系统提示词。
-       反馈与返回：打印进入提示（包含计划文件的路径），并返回 "plan"。
+                2. 进入计划模式（从其他模式切入 plan）
+        当当前模式不是 plan 时，执行 else 分支：
+        保护当前现场：self._pre_plan_mode = self.permission_mode。先把当前正在使用的模式（比如正常模式或自动接受模式）暂存起来，方便以后能原路返回。
+        切换并初始化：将当前模式设为 "plan"，生成一个专属的计划文件路径，并扩展系统提示词。通过拼接 _build_plan_mode_prompt()，给 AI 注入“只动脑不动手、输出结构化计划”的专属指令。
+        同步 OpenAI 消息：同样地，如果使用 OpenAI，也会实时更新上下文里的系统提示词。
+        反馈与返回：打印进入提示（包含计划文件的路径），并返回 "plan"。
         """
         if self.permission_mode == "plan":
             self.permission_mode = self._pre_plan_mode or "default"
@@ -380,7 +402,7 @@ class Agent:
             self._plan_file_path = None
             self._system_prompt = self._base_system_prompt
             if self.use_openai and self._openai_messages:
-                self._openai_messages[0]["content"] =self._system_prompt
+                self._openai_messages[0]["content"] = self._system_prompt
             print_info(f"Exited plan mode -> {self.permission_mode} mode")
             return self.permission_mode
         else:
@@ -392,12 +414,12 @@ class Agent:
             return "plan"
 
     def get_token_usage(self) -> dict:
-        return {"input":self.total_input_tokens, "output":self.total_output_tokens}
+        return {"input": self.total_input_tokens, "output": self.total_output_tokens}
 
-    #主入口
+    # 主入口
 
-    async def  chat(self, user_message:str)->None:
-        #懒加载MCP服务在第一次chat的时候
+    async def chat(self, user_message: str) -> None:
+        # 懒加载MCP服务在第一次chat的时候
         if not self._mcp_initialized and not self.is_sub_agent:
             self._mcp_initialized = True
             try:
@@ -444,10 +466,8 @@ class Agent:
             print_divider()
             self._auto_save()
 
-
-
-   #执行一次对话，收集本轮模型输出文本，并返回本轮消耗的 token 数
-    async def run_once(self, prompt:str)->None:
+    # 执行一次对话，收集本轮模型输出文本，并返回本轮消耗的 token 数
+    async def run_once(self, prompt: str) -> None:
         self._output_buffer = []
         prev_in = self.total_input_tokens
         prev_out = self.total_output_tokens
@@ -456,15 +476,12 @@ class Agent:
         self._output_buffer = None
         return {
             "text": text,
-            "tokens":{
-                "input":self.total_input_tokens-prev_in,
-                "output":self.total_output_tokens-prev_out
-            },
+            "tokens": {"input": self.total_input_tokens - prev_in, "output": self.total_output_tokens - prev_out},
         }
 
-    #输出工具：统一处理模型输出文本。根据当前是否处于“收集输出”的模式
+    # 输出工具：统一处理模型输出文本。根据当前是否处于“收集输出”的模式
     # 决定是把文本存进缓冲区，还是直接打印到终端。
-    def _emit_text(self, text:str)->None:
+    def _emit_text(self, text: str) -> None:
         text = _safe_utf8_text(text)
         if self._turn_output_buffer is not None:
             self._turn_output_buffer.append(text)
@@ -671,7 +688,9 @@ class Agent:
             side_query=side_query,
             retrieved_reference=window.get("retrieved_reference") or None,
             hint=str(window.get("hint") or ""),
-            confirm_write=self._confirm_online_skill_write if interactive_confirm else self._confirm_background_online_skill_write,
+            confirm_write=self._confirm_online_skill_write
+            if interactive_confirm
+            else self._confirm_background_online_skill_write,
             target=os.environ.get("BEAR_AUTO_SKILL_TARGET", "project"),
         )
         if result.get("ok"):
@@ -714,8 +733,7 @@ class Agent:
         self._pending_skill_extraction_window = None
         return {"ok": True}
 
-
-    def clear_history(self)->None:
+    def clear_history(self) -> None:
         self._anthropic_messages = []
         self._openai_messages = []
         self._pending_skill_extraction_window = None
@@ -727,7 +745,7 @@ class Agent:
         self._same_tool_repeat_count = 0
         self._last_tool_name = ""
         if self.use_openai:
-            self._openai_messages.append({"role": "system", "content":self._system_prompt})
+            self._openai_messages.append({"role": "system", "content": self._system_prompt})
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         self.last_input_token_count = 0
@@ -738,29 +756,32 @@ class Agent:
         budget_info = f" / ${self.max_cost_usd} budget" if self.max_cost_usd else ""
         turn_info = f" | Turns: {self.current_turns}/{self.max_turns}" if self.max_turns else ""
         print_info(
-            f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}")
+            f"Tokens: {self.total_input_tokens} in / {self.total_output_tokens} out\n  Estimated cost: ${total:.4f}{budget_info}{turn_info}"
+        )
 
-    #获取当前的花费，
+    # 获取当前的花费，
     def _get_current_cost_usd(self) -> float:
         return (self.total_input_tokens / 1_000_000) * 3 + (self.total_output_tokens / 1_000_000) * 15
 
-    #检查预算
+    # 检查预算
     def _check_budget(self) -> dict:
         if self.max_cost_usd is not None and self._get_current_cost_usd() >= self.max_cost_usd:
-            return {"exceeded": True, "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})"}
+            return {
+                "exceeded": True,
+                "reason": f"Cost limit reached (${self._get_current_cost_usd():.4f} >= ${self.max_cost_usd})",
+            }
         if self.max_turns is not None and self.current_turns >= self.max_turns:
             return {"exceeded": True, "reason": f"Turn limit reached ({self.current_turns} >= {self.max_turns})"}
         return {"exceeded": False}
 
-    #压缩会话
-    async def compact(self)->None:
+    # 压缩会话
+    async def compact(self) -> None:
         compacted = await self._compact_conversation(trigger="manual")
         if not compacted:
             print_info("Nothing to compact yet.")
 
-
-    #恢复会话信息
-    def restore_session(self, data:dict)->None:
+    # 恢复会话信息
+    def restore_session(self, data: dict) -> None:
         if data.get("anthropicMessages"):
             self._anthropic_messages = self._normalize_anthropic_messages(_sanitize_for_utf8(data["anthropicMessages"]))
         if data.get("openaiMessages"):
@@ -769,9 +790,7 @@ class Agent:
             self._folded_session_memories = _sanitize_for_utf8(data["foldedSessionMemories"])
         print_info(f"Session restored ({self._get_message_count()} messages).")
 
-
-
-#整理 Anthropic 的历史消息，修正部分角色错误，并丢弃不合法的工具调用消息。
+    # 整理 Anthropic 的历史消息，修正部分角色错误，并丢弃不合法的工具调用消息。
     def _normalize_anthropic_messages(self, messages: list[dict]) -> list[dict]:
         role_normalized = []
         for msg in messages:
@@ -828,28 +847,31 @@ class Agent:
 
     def _auto_save(self) -> None:
         try:
-            save_session(self.session_id, {
-                "metadata": {
-                    "id": self.session_id,
-                    "model": self.model,
-                    "cwd": str(Path.cwd()),
-                    "startTime": self.session_start_time,
-                    "messageCount": self._get_message_count(),
+            save_session(
+                self.session_id,
+                {
+                    "metadata": {
+                        "id": self.session_id,
+                        "model": self.model,
+                        "cwd": str(Path.cwd()),
+                        "startTime": self.session_start_time,
+                        "messageCount": self._get_message_count(),
+                    },
+                    "anthropicMessages": _sanitize_for_utf8(self._anthropic_messages) if not self.use_openai else None,
+                    "openaiMessages": _sanitize_for_utf8(self._openai_messages) if self.use_openai else None,
+                    "foldedSessionMemories": _sanitize_for_utf8(self._folded_session_memories),
                 },
-                "anthropicMessages": _sanitize_for_utf8(self._anthropic_messages) if not self.use_openai else None,
-                "openaiMessages": _sanitize_for_utf8(self._openai_messages) if self.use_openai else None,
-                "foldedSessionMemories": _sanitize_for_utf8(self._folded_session_memories),
-            })
+            )
         except Exception:
             pass
 
-    #自动压缩
-    async def _check_and_compact(self)->None:
+    # 自动压缩
+    async def _check_and_compact(self) -> None:
         if self.last_input_token_count > self.effective_window * AUTO_COMPACT_THRESHOLD:
             print_info("Context window filling up, compacting conversation...")
             await self._compact_conversation(trigger="auto")
 
-    async def _compact_conversation(self, *, trigger: str = "manual")->bool:
+    async def _compact_conversation(self, *, trigger: str = "manual") -> bool:
         if self.use_openai:
             compacted = await self._compact_openai(trigger=trigger)
         else:
@@ -858,8 +880,8 @@ class Agent:
             print_info("Conversation compacted.")
         return compacted
 
-    async def _compact_anthropic(self, *, trigger: str)->bool:
-        if len (self._anthropic_messages)<4:
+    async def _compact_anthropic(self, *, trigger: str) -> bool:
+        if len(self._anthropic_messages) < 4:
             return False
 
         transcript = build_anthropic_transcript(_sanitize_for_utf8(self._anthropic_messages))
@@ -873,8 +895,8 @@ class Agent:
         self._refresh_runtime_system_prompt()
         return True
 
-    async def _compact_openai(self, *, trigger: str)->bool:
-        if len (self._openai_messages)<4:
+    async def _compact_openai(self, *, trigger: str) -> bool:
+        if len(self._openai_messages) < 4:
             return False
         system_msg = self._openai_messages[0]
         transcript = build_openai_transcript(_sanitize_for_utf8(self._openai_messages))
@@ -883,11 +905,11 @@ class Agent:
         memory = await self._generate_folded_session_memory(transcript)
         self._record_folded_session_memory(trigger, memory)
         self._record_fold_event()
-        self._openai_messages=[
+        self._openai_messages = [
             system_msg,
             {"role": "user", "content": format_folded_memory(memory)},
         ]
-        self.last_input_token_count=0
+        self.last_input_token_count = 0
         self._refresh_runtime_system_prompt()
         return True
 
@@ -914,8 +936,8 @@ class Agent:
         except Exception:
             pass
 
-    #多层级压缩流水线
-    def _run_compression_pipeline(self)->None:
+    # 多层级压缩流水线
+    def _run_compression_pipeline(self) -> None:
         if self.use_openai:
             self._budget_tool_results_openai()
             self._snip_stale_results_openai()
@@ -925,81 +947,104 @@ class Agent:
             self._snip_stale_results_anthropic()
             self._microcompact_anthropic()
 
-    #第一层级压缩，预算压缩
-    def _budget_tool_results_anthropic(self)->None:
-        #计算利用率：utilization = 已用Token / 有效窗口大小。
+    # 第一层级压缩，预算压缩
+    def _budget_tool_results_anthropic(self) -> None:
+        # 计算利用率：utilization = 已用Token / 有效窗口大小。
         utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
-        #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
+        # 如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
         if utilization < 0.5:
             return
-        #动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
+        # 动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
         # 警戒状态（50%-70%）：如果利用率中等，只允许保留 30000 个字符。
         budget = 15000 if utilization > 0.7 else 30000
 
         for msg in self._anthropic_messages:
-
-            #只处理 role 为 "user" 的消息。在工具调用流程中，工具的执行结果通常是以“用户”的身份反馈给模型的。
+            # 只处理 role 为 "user" 的消息。在工具调用流程中，工具的执行结果通常是以“用户”的身份反馈给模型的。
 
             if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
                 continue
             for block in msg["content"]:
-                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and len(block["content"]) > budget:
-                    #计算保留长度 (keep)：keep = (budget - 80) // 2 这里预留了约 80 个字符的空间给中间的提示语，剩下的长度平分给开头和结尾。
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and isinstance(block.get("content"), str)
+                    and len(block["content"]) > budget
+                ):
+                    # 计算保留长度 (keep)：keep = (budget - 80) // 2 这里预留了约 80 个字符的空间给中间的提示语，剩下的长度平分给开头和结尾。
                     keep = (budget - 80) // 2
-                    #重组新内容 = 开头部分 + 提示语 + 结尾部分
-                    block["content"] = block["content"][:keep] + f"\n\n[... budgeted: {len(block['content']) - keep * 2} chars truncated ...]\n\n" + block["content"][-keep:]
+                    # 重组新内容 = 开头部分 + 提示语 + 结尾部分
+                    block["content"] = (
+                        block["content"][:keep]
+                        + f"\n\n[... budgeted: {len(block['content']) - keep * 2} chars truncated ...]\n\n"
+                        + block["content"][-keep:]
+                    )
 
-    def _budget_tool_results_openai(self)->None:
-        #计算利用率：utilization = 已用Token / 有效窗口大小。
+    def _budget_tool_results_openai(self) -> None:
+        # 计算利用率：utilization = 已用Token / 有效窗口大小。
         utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
-        #如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
+        # 如果利用率低于 50%，说明空间还很充裕，直接返回，不做任何处理。
         if utilization < 0.5:
             return
-        #动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
+        # 动态预算（Budget）：危急状态（>70%）：如果利用率很高，允许单个工具结果保留 15,000 个字符。
         # 警戒状态（50%-70%）：如果利用率中等，只允许保留 30000 个字符。
         budget = 15000 if utilization > 0.7 else 30000
 
         for msg in self._openai_messages:
             if msg.get("role") == "tool" and isinstance(msg.get("content"), str) and len(msg["content"]) > budget:
                 keep = (budget - 80) // 2
-                msg["content"] = msg["content"][:keep] + f"\n\n[... budgeted: {len(msg['content']) - keep * 2} chars truncated ...]\n\n" + msg["content"][-keep:]
+                msg["content"] = (
+                    msg["content"][:keep]
+                    + f"\n\n[... budgeted: {len(msg['content']) - keep * 2} chars truncated ...]\n\n"
+                    + msg["content"][-keep:]
+                )
 
-
-    #第二级策略：修剪过期的工具执行结果
+    # 第二级策略：修剪过期的工具执行结果
     def _snip_stale_results_anthropic(self) -> None:
         utilization = self.last_input_token_count / self.effective_window if self.effective_window else 0
         if utilization < SNIP_THRESHOLD:
             return
         results = []
-        for mindex,  msg in enumerate(self._anthropic_messages):
+        for mindex, msg in enumerate(self._anthropic_messages):
             if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
                 continue
 
             for bindex, block in enumerate(msg["content"]):
-                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and block["content"] != SNIP_PLACEHOLDER:
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and isinstance(block.get("content"), str)
+                    and block["content"] != SNIP_PLACEHOLDER
+                ):
                     tool_use_id = block.get("tool_use_id")
                     # 对每个 tool_result，通过 tool_use_id 反查它来自哪个工具
                     tool_info = self._find_tool_use_by_id(tool_use_id)
                     if tool_info and tool_info["name"] in SNIPPABLE_TOOLS:
-                        results.append({"mindex": mindex, "bindex": bindex, "name": tool_info["name"], "file_path": tool_info.get("input", {}).get("file_path")})
+                        results.append(
+                            {
+                                "mindex": mindex,
+                                "bindex": bindex,
+                                "name": tool_info["name"],
+                                "file_path": tool_info.get("input", {}).get("file_path"),
+                            }
+                        )
 
         if len(results) <= KEEP_RECENT_RESULTS:
             return
 
-        to_snip =  set()
+        to_snip = set()
         seen_files: dict[str, list[int]] = {}
 
         for i, r in enumerate(results):
             if r["name"] == "read_file" and r.get("file_path"):
                 seen_files.setdefault(r["file_path"], []).append(i)
-        #如果一个文件被读取了多次，只保留最后一次读取的结果，把前面几次读取的内容全部标记为“修剪”（Snip）。
+        # 如果一个文件被读取了多次，只保留最后一次读取的结果，把前面几次读取的内容全部标记为“修剪”（Snip）。
         for indices in seen_files.values():
-            if len (indices) >1 :
+            if len(indices) > 1:
                 for j in indices[:-1]:
-                    to_snip.add (j)
+                    to_snip.add(j)
 
         snip_before = len(results) - KEEP_RECENT_RESULTS
-        for i in range (snip_before):
+        for i in range(snip_before):
             to_snip.add(i)
 
         for idx in to_snip:
@@ -1020,10 +1065,10 @@ class Agent:
         for i in range(snip_count):
             self._openai_messages[tool_msgs[i]]["content"] = SNIP_PLACEHOLDER
 
-    #微压缩
+    # 微压缩
 
-    #基于“时间”的上下文瘦身策略，
-    #如果已经很久没说话了，说明之前的工具执行结果你已经看完了，那就把它们清理掉，腾出空间
+    # 基于“时间”的上下文瘦身策略，
+    # 如果已经很久没说话了，说明之前的工具执行结果你已经看完了，那就把它们清理掉，腾出空间
 
     def _microcompact_anthropic(self) -> None:
         if not self.last_api_call_time or (time.time() - self.last_api_call_time) < MICROCOMPACT_IDLE_S:
@@ -1031,10 +1076,15 @@ class Agent:
 
         all_results = []
         for mindex, msg in enumerate(self._anthropic_messages):
-            if msg.get("role")!="user" or not isinstance(msg.get("content"), list):
+            if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
                 continue
             for bindex, block in enumerate(msg["content"]):
-                if isinstance(block, dict) and block.get("type") == "tool_result" and isinstance(block.get("content"), str) and block["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]"):
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_result"
+                    and isinstance(block.get("content"), str)
+                    and block["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]")
+                ):
                     all_results.append((mindex, bindex))
 
         clear_count = len(all_results) - KEEP_RECENT_RESULTS
@@ -1047,7 +1097,11 @@ class Agent:
             return
         tool_msgs = []
         for i, msg in enumerate(self._openai_messages):
-            if msg.get("role") == "tool" and isinstance(msg.get("content"), str) and msg["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]"):
+            if (
+                msg.get("role") == "tool"
+                and isinstance(msg.get("content"), str)
+                and msg["content"] not in (SNIP_PLACEHOLDER, "[Old result cleared]")
+            ):
                 tool_msgs.append(i)
         clear_count = len(tool_msgs) - KEEP_RECENT_RESULTS
         for i in range(max(0, clear_count)):
@@ -1062,14 +1116,14 @@ class Agent:
                 if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id") == tool_use_id:
                     return {"name": block["name"], "input": block.get("input", {})}
 
-    #大结果持久化
-    #如果工具返回的结果太大（超过 30KB），不要硬塞进上下文里，而是把它存成一个临时文件。
+    # 大结果持久化
+    # 如果工具返回的结果太大（超过 30KB），不要硬塞进上下文里，而是把它存成一个临时文件。
     # 然后在对话里只留一个‘文件路径’和‘内容预览’。如果模型后面还需要看完整内容，它可以再次调用工具去读取这个文件
 
     def _persist_large_result(self, tool_name: str, result: str) -> str:
         THRESHOLD = 30 * 1024  # 30 KB
-        #转换成字节
-        if (len (result.encode())) <= THRESHOLD:
+        # 转换成字节
+        if (len(result.encode())) <= THRESHOLD:
             return result
 
         d = Path.home() / ".bear-code" / "tool-results"
@@ -1089,7 +1143,7 @@ class Agent:
             f"Preview (first 200 lines):\n{preview}"
         )
 
-    #执行工具入口
+    # 执行工具入口
 
     async def _execute_tool_call(self, name: str, inp: dict) -> str:
         if name == "compact_context":
@@ -1128,24 +1182,24 @@ class Agent:
             f"{suffix}"
         )
 
-
     async def _execute_skill_tool(self, inp: dict) -> str:
         from .skills import execute_skill
+
         result = execute_skill(inp.get("skill_name", ""), inp.get("args", ""))
 
         if not result:
             return f"Unknown skill: {inp.get('skill_name', '')}"
 
-        #fork 表示这个 skill 不直接把 prompt 塞回当前对话，而是要启动一个子 Agent 单独完成任务。
+        # fork 表示这个 skill 不直接把 prompt 塞回当前对话，而是要启动一个子 Agent 单独完成任务。
         if result["context"] == "fork":
             # result["allowed_tools"] - 直接访问
             tools = (
-                [t for t in self.tools if t["name"] in  result["allowed_tools"] ]
-                #result.get("allowed_tools") - 安全访问
+                [t for t in self.tools if t["name"] in result["allowed_tools"]]
+                # result.get("allowed_tools") - 安全访问
                 # 存在key：返回对应的值（可能是 None、[]、["tool1"] 等）
                 # 不存在key：返回 None（不会抛异常）
                 if result.get("allowed_tools")
-                else  [t for t in self.tools if t["name"] != "agent"]
+                else [t for t in self.tools if t["name"] != "agent"]
             )
 
             print_sub_agent_start("skill-fork", inp.get("skill_name", ""))
@@ -1175,7 +1229,7 @@ class Agent:
                 return "Already in plan mode."
             self._pre_plan_mode = self.permission_mode
             self.permission_mode = "plan"
-            self._plan_file_path =  self._generate_plan_file_path()
+            self._plan_file_path = self._generate_plan_file_path()
             self._system_prompt = self._base_system_prompt + self._build_plan_mode_prompt()
             if self.use_openai and self._openai_messages:
                 self._openai_messages[0]["content"] = self._system_prompt
@@ -1192,7 +1246,7 @@ class Agent:
                 result = self._plan_approval_fn(plan_content)
                 choice = result.get("choice", "manual-execute")
 
-                if choice =="keep-planning":
+                if choice == "keep-planning":
                     feedback = result.get("feedback") or "Please revise the plan."
                     return (
                         f"User rejected the plan and wants to keep planning.\n\n"
@@ -1207,7 +1261,7 @@ class Agent:
                 else:  # manual-execute
                     target_mode = self._pre_plan_mode or "default"
 
-                #离开计划模式
+                # 离开计划模式
                 self._pre_plan_mode = target_mode
                 self._pre_plan_mode = None
                 saved_plan_path = self._plan_file_path
@@ -1258,7 +1312,7 @@ class Agent:
         self._same_tool_repeat_count = 0
         self._last_tool_name = ""
 
-    async def _execute_agent_tool(self, inp:dict) -> str:
+    async def _execute_agent_tool(self, inp: dict) -> str:
         agent_type = inp.get("type", "general")
         description = inp.get("description", "sub-agent task")
         prompt = inp.get("prompt", "")
@@ -1284,8 +1338,8 @@ class Agent:
             print_sub_agent_end(agent_type, description)
             return f"Sub-agent error: {e}"
 
-#--------------Anthropic 后端---------------
-    async def  _chat_anthropic(self, user_message: str) -> None:
+    # --------------Anthropic 后端---------------
+    async def _chat_anthropic(self, user_message: str) -> None:
         self._anthropic_messages = self._normalize_anthropic_messages(_sanitize_for_utf8(self._anthropic_messages))
         user_message = _safe_utf8_text(user_message)
         # 先把本轮用户输入放入 Anthropic 消息历史，后续每轮模型调用都会带上这段上下文。
@@ -1293,13 +1347,15 @@ class Agent:
 
         # 异步内存预取：主 agent 才需要查 memory，sub agent 不额外注入记忆。
         # 这里只启动后台任务，不阻塞当前模型调用流程。
-        memory_prefetch:MemoryPrefetch | None = None
+        memory_prefetch: MemoryPrefetch | None = None
         if not self.is_sub_agent:
             sq = self._build_side_query()
             if sq:
                 memory_prefetch = start_memory_prefetch(
-                    user_message, sq,
-                    self._already_surfaced_memories, self._session_memory_bytes,
+                    user_message,
+                    sq,
+                    self._already_surfaced_memories,
+                    self._session_memory_bytes,
                 )
         while True:
             # 外部请求中止时，结束整个 agent loop。
@@ -1335,27 +1391,24 @@ class Agent:
                             # 记录本 session 已经注入过的 memory，后续检索时可避免重复 surfaced。
                             self._already_surfaced_memories.add(m.path)
                             self._session_memory_bytes += m.size
-                except:
+                except Exception:
                     # memory 注入失败不应该中断主对话流程。
                     pass
 
             if not self.is_sub_agent:
                 start_spinner()
 
-
             # 保存“提前执行”的工具任务。key 是 Anthropic 返回的 tool_use block id。
             early_executions: dict[str, asyncio.Task] = {}
 
-
-            def _on_tool_block(block:dict):
+            def _on_tool_block(block: dict):
                 # 流式响应中一旦完整收到 tool_use block，如果工具是并发安全且权限允许，
                 # 就可以提前开始执行，减少等待完整模型响应后的空档时间。
                 if block["name"] in CONCURRENCY_SAFE_TOOLS:
                     perm = check_permission(block["name"], block["input"], self.permission_mode, self._plan_file_path)
-                    if perm["action"]=="allow":
-                        task =asyncio.create_task(self._execute_tool_call(block["name"], block["input"]))
+                    if perm["action"] == "allow":
+                        task = asyncio.create_task(self._execute_tool_call(block["name"], block["input"]))
                         early_executions[block["id"]] = task
-
 
             # 调用 Anthropic 流式接口；流式过程中完成 tool block 时会触发 _on_tool_block。
             response = await self._call_anthropic_stream(on_tool_block_complete=_on_tool_block)
@@ -1372,10 +1425,12 @@ class Agent:
             tool_uses = [b for b in response.content if b.type == "tool_use"]
 
             # 把模型返回的所有 content block 写入消息历史，后续 tool_result 要与这些 tool_use 对应。
-            self._anthropic_messages.append({
-                "role": "assistant",
-                "content": [self._block_to_dict(b) for b in response.content],
-            })
+            self._anthropic_messages.append(
+                {
+                    "role": "assistant",
+                    "content": [self._block_to_dict(b) for b in response.content],
+                }
+            )
 
             # 没有工具调用，说明模型已经给出最终回复，本轮对话结束。
             if not tool_uses:
@@ -1388,19 +1443,20 @@ class Agent:
             budget = self._check_budget()
             if budget["exceeded"]:
                 print_info(f"Budget exceeded: {budget['reason']}")
-                self._anthropic_messages.append({
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": tu.id,
-                            "content": f"Tool execution skipped: {budget['reason']}",
-                        }
-                        for tu in tool_uses
-                    ],
-                })
+                self._anthropic_messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tu.id,
+                                "content": f"Tool execution skipped: {budget['reason']}",
+                            }
+                            for tu in tool_uses
+                        ],
+                    }
+                )
                 break
-
 
             # 收集本轮所有工具结果，之后作为 tool_result 消息回传给模型。
             tool_results: list[dict] = []
@@ -1436,8 +1492,13 @@ class Agent:
                     # 权限拒绝时，也要返回一个 tool_result，让模型知道该工具调用失败的原因。
                     print_info(f"Denied: {perm.get('message', '')}")
                     self._record_tool_outcome(tu.name, False)
-                    tool_results.append({"type": "tool_result", "tool_use_id": tu.id,
-                                         "content": f"Action denied: {perm.get('message', '')}"})
+                    tool_results.append(
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tu.id,
+                            "content": f"Action denied: {perm.get('message', '')}",
+                        }
+                    )
                     continue
 
                 if perm["action"] == "confirm" and perm.get("message") and perm["message"] not in self._confirmed_paths:
@@ -1446,7 +1507,8 @@ class Agent:
                     if not confirmed:
                         self._record_tool_outcome(tu.name, False)
                         tool_results.append(
-                            {"type": "tool_result", "tool_use_id": tu.id, "content": "User denied this action."})
+                            {"type": "tool_result", "tool_use_id": tu.id, "content": "User denied this action."}
+                        )
                         continue
                     self._confirmed_paths.add(perm["message"])
 
@@ -1487,15 +1549,20 @@ class Agent:
         if block.type == "text":
             return {"type": "text", "text": _safe_utf8_text(block.text)}
         if block.type == "tool_use":
-            raw_input = dict(block.input) if hasattr(block.input, 'items') else block.input
-            return {"type": "tool_use", "id": _safe_utf8_text(block.id), "name": _safe_utf8_text(block.name), "input": _sanitize_for_utf8(raw_input)}
+            raw_input = dict(block.input) if hasattr(block.input, "items") else block.input
+            return {
+                "type": "tool_use",
+                "id": _safe_utf8_text(block.id),
+                "name": _safe_utf8_text(block.name),
+                "input": _sanitize_for_utf8(raw_input),
+            }
         # Fallback
         return {"type": _safe_utf8_text(block.type)}
 
     async def _call_anthropic_stream(self, on_tool_block_complete=None):
 
         async def _do():
-            max_output =  _get_max_output_tokens(self.model)
+            max_output = _get_max_output_tokens(self.model)
 
             create_params: dict[str, Any] = {
                 "model": self.model,
@@ -1504,28 +1571,30 @@ class Agent:
                 "tools": _sanitize_for_utf8(get_active_tool_definitions(self.tools)),
                 "messages": _sanitize_for_utf8(self._anthropic_messages),
             }
-            #如果开启了思考模式，就给 Anthropic 请求加上 thinking 参数。
-            if self._thinking_mode  in ("adaptive", "enabled"):
-                create_params["thinking"]={"type": "enabled", "budget_tokens": max_output - 1}
+            # 如果开启了思考模式，就给 Anthropic 请求加上 thinking 参数。
+            if self._thinking_mode in ("adaptive", "enabled"):
+                create_params["thinking"] = {"type": "enabled", "budget_tokens": max_output - 1}
 
             first_text = True
 
             tool_blocks_by_index: dict[int, dict] = {}
 
-            async with self._anthropic_client.messages.stream(**create_params)as stream:
+            async with self._anthropic_client.messages.stream(**create_params) as stream:
                 async for event in stream:
-                    if not hasattr(event, 'type'):
+                    if not hasattr(event, "type"):
                         continue
                     # 当事件是工具调用开始：
                     if event.type == "content_block_start":
-                        cb = getattr(event, 'content_block', None)
-                        #如果 block 类型是 tool_use，就记录这个工具调用：
-                        if cb and getattr(cb, 'type', None) == "tool_use":
-                            #因为工具参数 JSON 是流式分片返回的，所以先准备一个空字符串 input_json。
-                            tool_blocks_by_index[event.index]= {
-                                "id": cb.id, "name": cb.name, "input_json": "",
+                        cb = getattr(event, "content_block", None)
+                        # 如果 block 类型是 tool_use，就记录这个工具调用：
+                        if cb and getattr(cb, "type", None) == "tool_use":
+                            # 因为工具参数 JSON 是流式分片返回的，所以先准备一个空字符串 input_json。
+                            tool_blocks_by_index[event.index] = {
+                                "id": cb.id,
+                                "name": cb.name,
+                                "input_json": "",
                             }
-                    #当事件是内容增量，分三种情况。
+                    # 当事件是内容增量，分三种情况。
                     elif event.type == "content_block_delta":
                         delta = event.delta
                         # 第一种，普通文本：模型输出正文时，
@@ -1537,59 +1606,67 @@ class Agent:
                                 self._emit_text("\n")
                                 first_text = False
                             self._emit_text(delta.text)
-                        #第二种，thinking 内容：
-                        #如果模型返回思考内容，也输出出来，并在开头加：[thinking]
-                        elif hasattr(delta, 'thinking'):
+                        # 第二种，thinking 内容：
+                        # 如果模型返回思考内容，也输出出来，并在开头加：[thinking]
+                        elif hasattr(delta, "thinking"):
                             if first_text:
                                 stop_spinner()
                                 self._emit_text("\n  [thinking] ")
                                 first_text = False
                             self._emit_text(delta.thinking)
-                        #第三种，工具参数 JSON 片段：工具调用的参数不是一次性返回，
+                        # 第三种，工具参数 JSON 片段：工具调用的参数不是一次性返回，
                         # 而是一段一段返回，所以这里不断拼接到 input_json。
-                        elif hasattr(delta, 'partial_json'):
+                        elif hasattr(delta, "partial_json"):
                             tb = tool_blocks_by_index.get(event.index)
                             if tb:
                                 tb["input_json"] += _safe_utf8_text(delta.partial_json)
-                    #当一个 content block 结束：
-                    #如果结束的是之前记录的工具调用，就把拼好的 JSON 解析出来：
+                    # 当一个 content block 结束：
+                    # 如果结束的是之前记录的工具调用，就把拼好的 JSON 解析出来：
                     elif event.type == "content_block_stop":
                         tb = tool_blocks_by_index.pop(event.index, None)
                         if tb and on_tool_block_complete:
                             import json as _json
+
                             try:
                                 parsed = _json.loads(tb["input_json"] or "{}")
                             except Exception:
                                 parsed = {}
-                            #然后调用回调：
-                            #这个回调的作用通常是：工具调用一完整，
+                            # 然后调用回调：
+                            # 这个回调的作用通常是：工具调用一完整，
                             # 就可以提前开始执行工具，不必等整条 assistant 消息全部结束。
-                            on_tool_block_complete({
-                                "type": "tool_use", "id": _safe_utf8_text(tb["id"]),
-                                "name": _safe_utf8_text(tb["name"]), "input": _sanitize_for_utf8(parsed),
-                            })
+                            on_tool_block_complete(
+                                {
+                                    "type": "tool_use",
+                                    "id": _safe_utf8_text(tb["id"]),
+                                    "name": _safe_utf8_text(tb["name"]),
+                                    "input": _sanitize_for_utf8(parsed),
+                                }
+                            )
                 final_message = await stream.get_final_message()
 
-            #过滤思考的message（因为 thinking 内容一般不应该进入历史消息，否则后续上下文会变大，也可能不符合 API 消息格式要求。）
+            # 过滤思考的message（因为 thinking 内容一般不应该进入历史消息，否则后续上下文会变大，也可能不符合 API 消息格式要求。）
             final_message.content = [b for b in final_message.content if b.type != "thinking"]
             return final_message
-#调用 _do()，如果遇到可重试错误，就由 _with_retry() 负责重试。
+
+        # 调用 _do()，如果遇到可重试错误，就由 _with_retry() 负责重试。
         return await _with_retry(_do)
 
-    #openAI后端
+    # openAI后端
 
-    async def _chat_openai(self, user_message:str) -> None:
+    async def _chat_openai(self, user_message: str) -> None:
         user_message = _safe_utf8_text(user_message)
         self._openai_messages.append({"role": "user", "content": user_message})
 
-        #预取句柄 MemoryPrefetch
+        # 预取句柄 MemoryPrefetch
         memory_prefetch: MemoryPrefetch | None = None
         if not self.is_sub_agent:
             sq = self._build_side_query()
             if sq:
                 memory_prefetch = start_memory_prefetch(
-                    user_message, sq,
-                    self._already_surfaced_memories, self._session_memory_bytes,
+                    user_message,
+                    sq,
+                    self._already_surfaced_memories,
+                    self._session_memory_bytes,
                 )
 
         while True:
@@ -1672,72 +1749,90 @@ class Agent:
                 if perm["action"] == "deny":
                     print_info(f"Denied: {perm.get('message', '')}")
                     self._record_tool_outcome(fn_name, False)
-                    oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": False,
-                                        "result": f"Action denied: {perm.get('message', '')}"})
+                    oai_checked.append(
+                        {
+                            "tc": tc,
+                            "fn": fn_name,
+                            "inp": inp,
+                            "allowed": False,
+                            "result": f"Action denied: {perm.get('message', '')}",
+                        }
+                    )
                     continue
                 if perm["action"] == "confirm" and perm.get("message") and perm["message"] not in self._confirmed_paths:
                     confirmed = await self._confirm_dangerous(perm["message"])
                     if not confirmed:
                         self._record_tool_outcome(fn_name, False)
-                        oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": False,
-                                            "result": "User denied this action."})
+                        oai_checked.append(
+                            {
+                                "tc": tc,
+                                "fn": fn_name,
+                                "inp": inp,
+                                "allowed": False,
+                                "result": "User denied this action.",
+                            }
+                        )
                         continue
                     self._confirmed_paths.add(perm["message"])
                 oai_checked.append({"tc": tc, "fn": fn_name, "inp": inp, "allowed": True})
 
-                oai_batches: list[dict] = []
-                for ct in oai_checked:
-                    safe = ct["allowed"] and ct["fn"] in CONCURRENCY_SAFE_TOOLS
-                    if safe and oai_batches and oai_batches[-1]["concurrent"]:
-                        oai_batches[-1]["items"].append(ct)
-                    else:
-                        oai_batches.append({"concurrent": safe, "items": [ct]})
+            # Build and execute batches only after every tool call has been
+            # validated. Doing this inside the loop re-executes earlier calls.
+            oai_batches: list[dict] = []
+            for ct in oai_checked:
+                safe = ct["allowed"] and ct["fn"] in CONCURRENCY_SAFE_TOOLS
+                if safe and oai_batches and oai_batches[-1]["concurrent"]:
+                    oai_batches[-1]["items"].append(ct)
+                else:
+                    oai_batches.append({"concurrent": safe, "items": [ct]})
 
-                oai_context_break = False
-                for batch in oai_batches:
-                    if oai_context_break or self._aborted:
-                        break
+            oai_context_break = False
+            for batch in oai_batches:
+                if oai_context_break or self._aborted:
+                    break
 
-                    if batch["concurrent"]:
-                        async def _run_oai_safe(ct_item: dict) -> tuple[dict, str]:
-                            raw = await self._execute_tool_call(ct_item["fn"], ct_item["inp"])
-                            raw = _safe_utf8_text(raw)
-                            res = self._persist_large_result(ct_item["fn"], raw)
-                            print_tool_result(ct_item["fn"], res)
-                            return ct_item, res
+                if batch["concurrent"]:
 
-                        results = await asyncio.gather(*[_run_oai_safe(ct) for ct in batch["items"]])
-                        for ct_item, res in results:
-                            self._record_tool_outcome(
-                                ct_item["fn"],
-                                not self._looks_like_tool_failure(ct_item["fn"], "", res),
-                            )
+                    async def _run_oai_safe(ct_item: dict) -> tuple[dict, str]:
+                        raw = await self._execute_tool_call(ct_item["fn"], ct_item["inp"])
+                        raw = _safe_utf8_text(raw)
+                        res = self._persist_large_result(ct_item["fn"], raw)
+                        print_tool_result(ct_item["fn"], res)
+                        return ct_item, res
+
+                    results = await asyncio.gather(*[_run_oai_safe(ct) for ct in batch["items"]])
+                    for ct_item, res in results:
+                        self._record_tool_outcome(
+                            ct_item["fn"],
+                            not self._looks_like_tool_failure(ct_item["fn"], "", res),
+                        )
+                        self._openai_messages.append(
+                            {"role": "tool", "tool_call_id": ct_item["tc"]["id"], "content": res}
+                        )
+                else:
+                    for ct in batch["items"]:
+                        if not ct["allowed"]:
                             self._openai_messages.append(
-                                {"role": "tool", "tool_call_id": ct_item["tc"]["id"], "content": res})
-                    else:
-                        for ct in batch["items"]:
-                            if not ct["allowed"]:
-                                self._openai_messages.append(
-                                    {"role": "tool", "tool_call_id": ct["tc"]["id"], "content": ct["result"]})
-                                continue
-
-                            raw = await self._execute_tool_call(ct["fn"], ct["inp"])
-                            raw = _safe_utf8_text(raw)
-                            res = self._persist_large_result(ct["fn"], raw)
-                            print_tool_result(ct["fn"], res)
-                            self._record_tool_outcome(
-                                ct["fn"],
-                                not self._looks_like_tool_failure(ct["fn"], raw, res),
+                                {"role": "tool", "tool_call_id": ct["tc"]["id"], "content": ct["result"]}
                             )
+                            continue
 
-                            if self._context_cleared:
-                                self._context_cleared = False
-                                self._openai_messages.append({"role": "user", "content": res})
-                                oai_context_break = True
-                                break
+                        raw = await self._execute_tool_call(ct["fn"], ct["inp"])
+                        raw = _safe_utf8_text(raw)
+                        res = self._persist_large_result(ct["fn"], raw)
+                        print_tool_result(ct["fn"], res)
+                        self._record_tool_outcome(
+                            ct["fn"],
+                            not self._looks_like_tool_failure(ct["fn"], raw, res),
+                        )
 
-                            self._openai_messages.append(
-                                {"role": "tool", "tool_call_id": ct["tc"]["id"], "content": res})
+                        if self._context_cleared:
+                            self._context_cleared = False
+                            self._openai_messages.append({"role": "user", "content": res})
+                            oai_context_break = True
+                            break
+
+                        self._openai_messages.append({"role": "tool", "tool_call_id": ct["tc"]["id"], "content": res})
 
             self._context_cleared = False
             self._refresh_runtime_system_prompt()
@@ -1802,14 +1897,16 @@ class Agent:
                 ]
 
             return {
-                "choices": [{
-                    "message": {
-                        "role": "assistant",
-                        "content": content or None,
-                        "tool_calls": assembled,
-                    },
-                    "finish_reason": finish_reason or "stop",
-                }],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": content or None,
+                            "tool_calls": assembled,
+                        },
+                        "finish_reason": finish_reason or "stop",
+                    }
+                ],
                 "usage": usage or {"prompt_tokens": 0, "completion_tokens": 0},
             }
 

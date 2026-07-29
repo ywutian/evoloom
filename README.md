@@ -57,8 +57,12 @@ BearAgent/
 │   ├── skills/                    # 项目级 Skills
 │   └── skill-evolution/           # Skills 自进化审计产物
 ├── wiki/                          # 项目文档中心
+├── tests/                         # 权限边界和 Agent Loop 回归测试
+├── scripts/quality_report.py      # 可机器读取的质量指标
+├── pyproject.toml                 # Python 包和工具配置
+├── uv.lock                        # 完整依赖锁文件
+├── requirements.lock.txt          # Docker 哈希锁定依赖
 ├── Dockerfile
-├── requirements.txt
 └── README.md
 ```
 
@@ -74,12 +78,10 @@ BearAgent/
 - ripgrep，可选但推荐
 - 一个 OpenAI-compatible 或 Anthropic-compatible 模型接口
 
-安装依赖：
+使用 uv 安装锁定依赖：
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+uv sync --extra dev --frozen
 ```
 
 ### 2. 配置 `.env`
@@ -119,7 +121,7 @@ MODEL=deepseek-chat
 ### 3. 启动 REPL
 
 ```bash
-python3 -m agents.main
+uv run bear-code
 ```
 
 启动后直接输入任务，例如：
@@ -131,7 +133,7 @@ python3 -m agents.main
 ### 4. 执行一次性任务
 
 ```bash
-python3 -m agents.main "总结这个项目的目录结构和核心模块"
+uv run bear-code "总结这个项目的目录结构和核心模块"
 ```
 
 ### 5. 使用 Plan Mode
@@ -139,7 +141,7 @@ python3 -m agents.main "总结这个项目的目录结构和核心模块"
 Plan Mode 适合重构、复杂修复和多文件修改。它会先只读分析和写计划，用户审批后再执行。
 
 ```bash
-python3 -m agents.main --plan "分析 Skills 检索逻辑应该如何优化"
+uv run bear-code --plan "分析 Skills 检索逻辑应该如何优化"
 ```
 
 REPL 中也可以输入：
@@ -151,7 +153,7 @@ REPL 中也可以输入：
 ### 6. 恢复最近会话
 
 ```bash
-python3 -m agents.main --resume
+uv run bear-code --resume
 ```
 
 ## 如何让项目自动沉淀并进化 Skills
@@ -371,6 +373,8 @@ Bear Code 支持 MCP 外部工具扩展。MCP Server 可以通过 stdio JSON-RPC
 <project>/.mcp.json
 ```
 
+仓库中的 `.mcp.example.json` 是可选模板。复制为 `.mcp.json` 后才会启用，生产镜像默认不启动第三方 MCP Server。
+
 配置示例：
 
 ```json
@@ -405,8 +409,8 @@ docker build -t bear-code .
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  -v bear-code-sessions:/root/.bear-code \
-  -v bear-code-memory:/root/.BearCode \
+  -v bear-code-sessions:/home/bear/.bear-code \
+  -v bear-code-memory:/home/bear/.BearCode \
   bear-code
 ```
 
@@ -418,9 +422,36 @@ docker run --rm -it \
   -e BEAR_AUTO_SKILL_EVOLUTION=1 \
   -e BEAR_AUTO_SKILL_TARGET=project \
   -v "$PWD:/workspace" \
-  -v bear-code-sessions:/root/.bear-code \
-  -v bear-code-memory:/root/.BearCode \
+  -v bear-code-sessions:/home/bear/.bear-code \
+  -v bear-code-memory:/home/bear/.BearCode \
   bear-code --accept-edits
+```
+
+镜像使用 UID `10001` 的非 root 用户，并将模型可访问的文件范围限制在 `BEAR_WORKSPACE=/workspace`。Shell 在默认模式下始终需要确认；无人值守环境应使用 `--dont-ask` 和显式权限规则。
+
+## 工程质量闭环
+
+每次提交和 Pull Request 都会执行相同的本地门禁：
+
+```bash
+make quality
+```
+
+门禁包含：
+
+- Ruff 静态检查。
+- Pytest 回归测试和最低覆盖率基线。
+- OpenAI 多工具调用“每个调用只执行一次”测试。
+- 工作区路径、符号链接逃逸和 Shell 权限测试。
+- `quality-budget.json` 中的复杂度、函数长度、宽泛异常和测试数量预算。
+- Docker 镜像构建验证。
+
+`scripts/quality_report.py` 输出 JSON 指标。优化一个模块后，应同步收紧 `quality-budget.json`，保证质量只能改善、不能静默回退。当前 15% 覆盖率只是从原来 0 个项目测试建立的首个基线，目标是核心 Agent Loop、权限和工具模块达到 95%，全项目达到 80%。
+
+发布版本时创建 `v*` Git tag，GitHub Actions 会构建并推送：
+
+```text
+ghcr.io/<github-owner>/bear-code:<tag>
 ```
 
 ## 重要数据路径

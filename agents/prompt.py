@@ -210,6 +210,7 @@ def get_git_context() -> str:
 def build_system_prompt() -> str:
     """Build the full system prompt from embedded template + dynamic context."""
     from datetime import date
+
     today = date.today().isoformat()
     plat = f"{platform.system()} {platform.machine()}"
     shell = (os.environ.get("ComSpec") or "cmd.exe") if sys.platform == "win32" else os.environ.get("SHELL", "/bin/sh")
@@ -222,7 +223,8 @@ def build_system_prompt() -> str:
     deferred_names = get_deferred_tool_names()
     deferred_section = (
         f"\n\nThe following deferred tools are available via tool_search: {', '.join(deferred_names)}. Use tool_search to fetch their full schemas when needed."
-        if deferred_names else ""
+        if deferred_names
+        else ""
     )
 
     replacements = {

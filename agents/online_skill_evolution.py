@@ -5,7 +5,6 @@ import re
 from dataclasses import asdict, dataclass, field
 from typing import Any, Awaitable, Callable
 
-
 SideQuery = Callable[[str, str], Awaitable[str]]
 ConfirmWrite = Callable[[str], Awaitable[bool]]
 
@@ -88,7 +87,7 @@ async def extract_online_skill_candidate(
     system = (
         "You are Bear Code's online Skill Extractor.\n"
         "Extract at most ONE reusable skill candidate from a live conversation window.\n"
-        "Output ONLY strict JSON: {\"skills\": []} or {\"skills\": [{...}]}.\n\n"
+        'Output ONLY strict JSON: {"skills": []} or {"skills": [{...}]}.\n\n'
         "Candidate fields: name, description, when_to_use, instructions, evidence, tags.\n\n"
         "Rules:\n"
         "- USER turns are the primary evidence. Assistant turns are context only.\n"
@@ -97,7 +96,7 @@ async def extract_online_skill_candidate(
         "- Extract only durable workflow, output policy, implementation preference, correction, or repeated constraint likely useful for future similar tasks.\n"
         "- Remove entity names and runtime-specific payload; use placeholders where needed.\n"
         "- retrieved_reference is identity context only; never treat it as new user evidence.\n"
-        "- If evidence is weak, generic, or low-value, return {\"skills\": []}.\n"
+        '- If evidence is weak, generic, or low-value, return {"skills": []}.\n'
     )
     payload = {
         "messages": messages,
@@ -153,9 +152,9 @@ async def maintain_online_skill_candidate(
         "Decide whether a candidate should add a new skill, merge into an existing skill, or be discarded.\n"
         "Output ONLY strict JSON.\n\n"
         "Schema:\n"
-        "{\"action\":\"add|merge|discard\",\"target_skill\":\"existing name for merge\","
-        "\"reason\":\"short reason\",\"merged_description\":\"optional\","
-        "\"merged_when_to_use\":\"optional\",\"merged_instructions\":\"optional full merged SKILL.md body\"}\n\n"
+        '{"action":"add|merge|discard","target_skill":"existing name for merge",'
+        '"reason":"short reason","merged_description":"optional",'
+        '"merged_when_to_use":"optional","merged_instructions":"optional full merged SKILL.md body"}\n\n'
         "Rules:\n"
         "- Prefer merge over add when the same capability already exists.\n"
         "- Discard if the candidate duplicates an existing shared/project skill and adds no user-specific durable improvement.\n"
@@ -331,7 +330,7 @@ async def judge_retrieved_skill_usage(
 
     system = (
         "Judge whether retrieved skills were relevant to the user request and actually used in the assistant reply.\n"
-        "Output ONLY strict JSON: {\"judgments\":[{\"name\":\"...\",\"relevant\":true|false,\"used\":true|false,\"reason\":\"short\"}]}.\n"
+        'Output ONLY strict JSON: {"judgments":[{"name":"...","relevant":true|false,"used":true|false,"reason":"short"}]}.\n'
         "A skill is used only if the reply follows its distinctive workflow or policy, not merely because it was retrieved."
     )
     payload = {"user_message": user_message, "assistant_reply": assistant_text, "retrieved_skills": hits}

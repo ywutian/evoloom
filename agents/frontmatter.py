@@ -29,11 +29,11 @@ def parse_frontmatter(content: str) -> FrontmatterResult:
         if colon_idx == -1:
             continue
         key = lines[i][:colon_idx].strip()
-        value = lines[i][colon_idx + 1:].strip()
+        value = lines[i][colon_idx + 1 :].strip()
         if key:
             meta[key] = value
 
-    body = "\n".join(lines[end_idx + 1:]).strip()
+    body = "\n".join(lines[end_idx + 1 :]).strip()
     return FrontmatterResult(meta=meta, body=body)
 
 

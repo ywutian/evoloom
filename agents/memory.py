@@ -18,18 +18,18 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
-from .frontmatter import parse_frontmatter, format_frontmatter
-from typing import Callable
+from .frontmatter import format_frontmatter, parse_frontmatter
+
 # side query 是一个异步函数：输入 system prompt 和 user prompt，返回模型文本。
 # 这里标成 Any 是为了避免在运行时引入复杂 Awaitable 类型约束。
 SideQueryFn = Callable[[str, str], Any]  # actually Awaitable[str]
 
 
 VALID_TYPES = {"user", "feedback", "project", "reference"}
-MAX_INDEX_LINES = 200       # MEMORY.md 注入 system prompt 前最多保留的行数。
-MAX_INDEX_BYTES = 25000     # MEMORY.md 注入 system prompt 前最多保留的字节数。
+MAX_INDEX_LINES = 200  # MEMORY.md 注入 system prompt 前最多保留的行数。
+MAX_INDEX_BYTES = 25000  # MEMORY.md 注入 system prompt 前最多保留的字节数。
 
 
 class MemoryEntry:
@@ -43,8 +43,6 @@ class MemoryEntry:
         self.type = type
         self.filename = filename
         self.content = content
-
-
 
 
 def _project_hash() -> str:
@@ -64,15 +62,11 @@ def _get_index_path() -> Path:
     return get_memory_dir() / "MEMORY.md"
 
 
-
-
 def _slugify(text: str) -> str:
     """把记忆名称转成适合文件名的短 slug。"""
     s = re.sub(r"[^a-z0-9]+", "_", text.lower())
     s = s.strip("_")
     return s[:40]
-
-
 
 
 def list_memories() -> list[MemoryEntry]:
@@ -91,13 +85,15 @@ def list_memories() -> list[MemoryEntry]:
                 continue
             # type 不合法时降级为 project，避免坏文件中断列表。
             t = meta["type"] if meta["type"] in VALID_TYPES else "project"
-            entries.append(MemoryEntry(
-                name=meta["name"],
-                description=meta.get("description", ""),
-                type=t,
-                filename=f.name,
-                content=result.body,
-            ))
+            entries.append(
+                MemoryEntry(
+                    name=meta["name"],
+                    description=meta.get("description", ""),
+                    type=t,
+                    filename=f.name,
+                    content=result.body,
+                )
+            )
         except Exception:
             pass
     # 最近修改的记忆排在前面，方便 /memory 展示。
@@ -125,8 +121,6 @@ def delete_memory(filename: str) -> bool:
     return True
 
 
-
-
 def _update_memory_index() -> None:
     """根据当前 memory 文件重新生成 MEMORY.md。"""
     memories = list_memories()
@@ -152,13 +146,13 @@ def load_memory_index() -> str:
 
 # ─── Memory Header (lightweight scan) ──────────────────────
 
+
 class MemoryHeader:
     """轻量 memory 摘要，只包含召回筛选需要的元信息。"""
 
     __slots__ = ("filename", "file_path", "mtime_ms", "description", "type")
 
-    def __init__(self, filename: str, file_path: str, mtime_ms: float,
-                 description: str | None, type: str | None):
+    def __init__(self, filename: str, file_path: str, mtime_ms: float, description: str | None, type: str | None):
         self.filename = filename
         self.file_path = file_path
         self.mtime_ms = mtime_ms
@@ -166,9 +160,9 @@ class MemoryHeader:
         self.type = type
 
 
-MAX_MEMORY_FILES = 200                    # 参与召回筛选的最多 memory 文件数。
-MAX_MEMORY_BYTES_PER_FILE = 4096          # 单个 memory 注入前的最大字节数。
-MAX_SESSION_MEMORY_BYTES = 60 * 1024      # 单个会话最多注入的 memory 总量。
+MAX_MEMORY_FILES = 200  # 参与召回筛选的最多 memory 文件数。
+MAX_MEMORY_BYTES_PER_FILE = 4096  # 单个 memory 注入前的最大字节数。
+MAX_SESSION_MEMORY_BYTES = 60 * 1024  # 单个会话最多注入的 memory 总量。
 
 
 def scan_memory_headers() -> list[MemoryHeader]:
@@ -186,13 +180,15 @@ def scan_memory_headers() -> list[MemoryHeader]:
             result = parse_frontmatter(first30)
             meta = result.meta
             t = meta.get("type")
-            headers.append(MemoryHeader(
-                filename=f.name,
-                file_path=str(f),
-                mtime_ms=stat.st_mtime * 1000,
-                description=meta.get("description"),
-                type=t if t in VALID_TYPES else None,
-            ))
+            headers.append(
+                MemoryHeader(
+                    filename=f.name,
+                    file_path=str(f),
+                    mtime_ms=stat.st_mtime * 1000,
+                    description=meta.get("description"),
+                    type=t if t in VALID_TYPES else None,
+                )
+            )
         except Exception:
             pass
     headers.sort(key=lambda h: h.mtime_ms, reverse=True)
@@ -214,6 +210,7 @@ def format_memory_manifest(headers: list[MemoryHeader]) -> str:
 
 # ─── Memory Age / Freshness ────────────────────────────────
 
+
 def memory_age(mtime_ms: float) -> str:
     """把修改时间转换成适合展示的相对时间。"""
     days = max(0, int((time.time() * 1000 - mtime_ms) / 86_400_000))
@@ -229,10 +226,11 @@ def memory_freshness_warning(mtime_ms: float) -> str:
     days = max(0, int((time.time() * 1000 - mtime_ms) / 86_400_000))
     if days <= 1:
         return ""
-    return (f"This memory is {days} days old. Memories are point-in-time observations, "
-            "not live state — claims about code behavior may be outdated. "
-            "Verify against current code before asserting as fact.")
-
+    return (
+        f"This memory is {days} days old. Memories are point-in-time observations, "
+        "not live state — claims about code behavior may be outdated. "
+        "Verify against current code before asserting as fact."
+    )
 
 
 SELECT_MEMORIES_PROMPT = """You are selecting memories that will be useful to an AI coding assistant as it processes a user's query. You will be given the user's query and a list of available memory files with their filenames and descriptions.
@@ -318,14 +316,19 @@ async def select_relevant_memories(
             # 根据 memory 修改时间生成提示头；旧记忆会附带 freshness warning。
             freshness = memory_freshness_warning(h.mtime_ms)
             header_text = (
-                f"{freshness}\n\nMemory: {h.file_path}:" if freshness
+                f"{freshness}\n\nMemory: {h.file_path}:"
+                if freshness
                 else f"Memory (saved {memory_age(h.mtime_ms)}): {h.file_path}:"
             )
             # 返回 RelevantMemory 列表，后续会被格式化成 <system-reminder>。
-            result.append(RelevantMemory(
-                path=h.file_path, content=content,
-                mtime_ms=h.mtime_ms, header=header_text,
-            ))
+            result.append(
+                RelevantMemory(
+                    path=h.file_path,
+                    content=content,
+                    mtime_ms=h.mtime_ms,
+                    header=header_text,
+                )
+            )
         return result
     except Exception as e:
         # 召回失败不应该影响主对话；取消类错误直接静默。
@@ -377,9 +380,7 @@ def start_memory_prefetch(
         return None
 
     # 条件通过后创建异步任务，让召回和主模型请求并行推进。
-    task = asyncio.create_task(
-        select_relevant_memories(query, side_query, already_surfaced)
-    )
+    task = asyncio.create_task(select_relevant_memories(query, side_query, already_surfaced))
     return MemoryPrefetch(task)
 
 

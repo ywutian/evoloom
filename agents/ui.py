@@ -62,14 +62,16 @@ def print_welcome() -> None:
     body.add_row(Panel(commands, title="Quick Commands", border_style="cyan", box=box.ROUNDED))
 
     console.print()
-    console.print(Panel(
-        body,
-        title="[bold #f6c177] bear cookie ready [/bold #f6c177]",
-        subtitle="[dim]Type your request below[/dim]",
-        border_style="#d19a66",
-        box=box.ROUNDED,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            body,
+            title="[bold #f6c177] bear cookie ready [/bold #f6c177]",
+            subtitle="[dim]Type your request below[/dim]",
+            border_style="#d19a66",
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
     console.print()
 
 
@@ -90,13 +92,15 @@ def print_tool_call(name: str, inp: dict) -> None:
     table.add_row("tool", f"{icon} {name}")
     if summary:
         table.add_row("input", _safe_text(summary))
-    console.print(Panel(
-        table,
-        title="[bold yellow]Tool Call[/bold yellow]",
-        border_style="yellow",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            table,
+            title="[bold yellow]Tool Call[/bold yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_tool_result(name: str, result: str) -> None:
@@ -108,24 +112,28 @@ def print_tool_result(name: str, result: str) -> None:
     truncated = result
     if len(result) > max_len:
         truncated = result[:max_len] + f"\n  ... ({len(result)} chars total)"
-    console.print(Panel(
-        _safe_text(truncated),
-        title=f"[dim]{name} result[/dim]",
-        border_style="dim",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(truncated),
+            title=f"[dim]{name} result[/dim]",
+            border_style="dim",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def _print_file_change_result(_name: str, result: str) -> None:
     lines = result.split("\n")
-    console.print(Panel(
-        _safe_text(lines[0]),
-        title="[bold green]File Change[/bold green]",
-        border_style="green",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(lines[0]),
+            title="[bold green]File Change[/bold green]",
+            border_style="green",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
     max_display = 40
     content_lines = lines[1:]
@@ -147,23 +155,27 @@ def _print_file_change_result(_name: str, result: str) -> None:
 
 
 def print_error(msg: str) -> None:
-    console.print(Panel(
-        _safe_text(msg),
-        title="[bold red]Error[/bold red]",
-        border_style="red",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(msg),
+            title="[bold red]Error[/bold red]",
+            border_style="red",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_confirmation(command: str) -> None:
-    console.print(Panel(
-        _safe_text(command),
-        title="[bold yellow]Dangerous command[/bold yellow]",
-        border_style="yellow",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(command),
+            title="[bold yellow]Dangerous command[/bold yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_divider() -> None:
@@ -188,32 +200,38 @@ def print_retry(attempt: int, max_retries: int, reason: str) -> None:
 
 
 def print_info(msg: str) -> None:
-    console.print(Panel(
-        _safe_text(msg),
-        title="[bold cyan]Info[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(msg),
+            title="[bold cyan]Info[/bold cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_warning(msg: str) -> None:
-    console.print(Panel(
-        _safe_text(msg),
-        title="[bold yellow]Notice[/bold yellow]",
-        border_style="yellow",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(msg),
+            title="[bold yellow]Notice[/bold yellow]",
+            border_style="yellow",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_goodbye() -> None:
-    console.print(Panel(
-        Text("Bye. Bear cookie saved for next time.", style="bold #f6c177"),
-        border_style="#d19a66",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            Text("Bye. Bear cookie saved for next time.", style="bold #f6c177"),
+            border_style="#d19a66",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_interrupted() -> None:
@@ -265,13 +283,15 @@ def print_plan_for_approval(plan_content: str) -> None:
     preview = "\n".join(lines[:max_lines])
     if len(lines) > max_lines:
         preview += f"\n\n... ({len(lines) - max_lines} more lines)"
-    console.print(Panel(
-        _safe_text(preview),
-        title="[bold cyan]Plan for Approval[/bold cyan]",
-        border_style="cyan",
-        box=box.ROUNDED,
-        padding=(1, 2),
-    ))
+    console.print(
+        Panel(
+            _safe_text(preview),
+            title="[bold cyan]Plan for Approval[/bold cyan]",
+            border_style="cyan",
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+    )
 
 
 def print_plan_approval_options() -> None:
@@ -283,30 +303,36 @@ def print_plan_approval_options() -> None:
     table.add_row("2", "Execute", "keep context, auto-accept edits")
     table.add_row("3", "Manually approve edits", "keep context, confirm each edit")
     table.add_row("4", "Keep planning", "provide feedback to revise")
-    console.print(Panel(table, title="[bold yellow]Choose an option[/bold yellow]", border_style="yellow", box=box.ROUNDED))
+    console.print(
+        Panel(table, title="[bold yellow]Choose an option[/bold yellow]", border_style="yellow", box=box.ROUNDED)
+    )
 
 
 # ─── Sub-agent display ──────────────────────────────────────
 
 
 def print_sub_agent_start(agent_type: str, description: str) -> None:
-    console.print(Panel(
-        _safe_text(description),
-        title=f"[bold magenta]Sub-agent started: {agent_type}[/bold magenta]",
-        border_style="magenta",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            _safe_text(description),
+            title=f"[bold magenta]Sub-agent started: {agent_type}[/bold magenta]",
+            border_style="magenta",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_sub_agent_end(agent_type: str, _description: str) -> None:
-    console.print(Panel(
-        "completed",
-        title=f"[bold magenta]Sub-agent finished: {agent_type}[/bold magenta]",
-        border_style="magenta",
-        box=box.ROUNDED,
-        padding=(0, 1),
-    ))
+    console.print(
+        Panel(
+            "completed",
+            title=f"[bold magenta]Sub-agent finished: {agent_type}[/bold magenta]",
+            border_style="magenta",
+            box=box.ROUNDED,
+            padding=(0, 1),
+        )
+    )
 
 
 def print_memory_entries(memories: list[object]) -> None:
@@ -382,5 +408,5 @@ def _get_tool_summary(name: str, inp: dict) -> str:
     if name == "skill_evolve":
         return inp.get("skill_name", "")
     if name == "agent":
-        return f'[{inp.get("type", "general")}] {inp.get("description", "")}'
+        return f"[{inp.get('type', 'general')}] {inp.get('description', '')}"
     return ""
