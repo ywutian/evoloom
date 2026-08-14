@@ -1,6 +1,6 @@
 # 在线 Skills 评测实现说明
 
-本文档说明 Bear Code 的在线 Skills 评测是怎么做的。重点解释每个阶段的名词含义、代码流程、输入输出和当前边界。
+本文档说明 EvoLoom 的在线 Skills 评测是怎么做的。重点解释每个阶段的名词含义、代码流程、输入输出和当前边界。
 
 核心实现文件：
 
@@ -164,7 +164,7 @@ evaluate_online_skill_evolution(
 评测读取的数据目录：
 
 ```text
-.bear/skill-evolution/
+.evoloom/skill-evolution/
 ```
 
 主要输入文件：
@@ -186,8 +186,8 @@ agents/skills.py::discover_skills()
 读取当前 active Skills：
 
 ```text
-~/.bear/skills/<skill>/SKILL.md
-<project>/.bear/skills/<skill>/SKILL.md
+~/.evoloom/skills/<skill>/SKILL.md
+<project>/.evoloom/skills/<skill>/SKILL.md
 ```
 
 ### 3.3 输入数据进入评测后的作用
@@ -343,7 +343,7 @@ online_skill_provenance.json 中的 sources
 每个 lineage 会有一个 replay pool：
 
 ```text
-.bear/skill-evolution/online-eval/datasets/<lineage_id>/replay_pool.jsonl
+.evoloom/skill-evolution/online-eval/datasets/<lineage_id>/replay_pool.jsonl
 ```
 
 ### 6.3 固化过程
@@ -894,9 +894,9 @@ DEFAULT_MIN_SCORE_DELTA = 0.01
 ### 14.4 产物位置
 
 ```text
-.bear/skill-evolution/online-eval/champions.json
-.bear/skill-evolution/online-eval/champions/<lineage_id>/champion.json
-.bear/skill-evolution/online-eval/champions/<lineage_id>/SKILL.md
+.evoloom/skill-evolution/online-eval/champions.json
+.evoloom/skill-evolution/online-eval/champions/<lineage_id>/champion.json
+.evoloom/skill-evolution/online-eval/champions/<lineage_id>/SKILL.md
 ```
 
 ## 15. 输出产物
@@ -916,7 +916,7 @@ DEFAULT_MIN_SCORE_DELTA = 0.01
 ### 15.2 产物结构
 
 ```text
-.bear/skill-evolution/online-eval/
+.evoloom/skill-evolution/online-eval/
   datasets/<lineage_id>/replay_pool.jsonl
   evals/<lineage_id>/eval_spec.json
   runs/<lineage_id>/<run_id>/outputs.jsonl
@@ -956,7 +956,7 @@ YYYYMMDDTHHMMSSZ-<lineage_id_suffix>
 ### 16.2 报告路径
 
 ```text
-.bear/skill-evolution/online_eval_report.json
+.evoloom/skill-evolution/online_eval_report.json
 ```
 
 ### 16.3 顶层结构
@@ -1019,7 +1019,7 @@ YYYYMMDDTHHMMSSZ-<lineage_id_suffix>
 
 ```text
 Online skill eval:
-  data_dir=/path/to/.bear/skill-evolution
+  data_dir=/path/to/.evoloom/skill-evolution
   aggregate: ingests=8, ok_rate=100.0%, candidate_events=1, acceptance_rate=100.0%, replay_samples=1, rule_pass_rate=50.0%, llm=on, llm_rules=4, llm_judgments=1, llm_pass_rate=0.0%, candidates=1
   actions: none=7, add=1, merge=0, discard=0, failed=0, denied=0
   statuses: incubating=3, unobserved=1
@@ -1065,7 +1065,7 @@ watch
 
 ```text
 Online skill eval:
-  data_dir=/Users/xiao_xiong/Desktop/code/BearCode/.bear/skill-evolution
+  data_dir=/Users/xiao_xiong/Desktop/code/EvoLoom/.evoloom/skill-evolution
   aggregate: ingests=8, ok_rate=100.0%, candidate_events=1, acceptance_rate=100.0%, replay_samples=1, rule_pass_rate=50.0%, llm=on, llm_rules=4, llm_judgments=1, llm_pass_rate=0.0%, candidates=1
   actions: none=7, add=1, merge=0, discard=0, failed=0, denied=0
   statuses: incubating=3, unobserved=1
@@ -1075,7 +1075,7 @@ Online skill eval:
     zhangxuefeng-perspective: status=incubating, replay=0 (test=0), rules=4, llm_rules=1, llm_judgments=0, candidates=0, best_candidate_score=0.00, rule_pass=0.0%, hard_failures=0, retrieved=12, used_rate=0.0%, champion=incubating - only 0 replay sample(s); only 0 promotion-test sample(s)
     webnovel-writing: status=incubating, replay=0 (test=0), rules=2, llm_rules=1, llm_judgments=0, candidates=0, best_candidate_score=0.00, rule_pass=0.0%, hard_failures=0, retrieved=6, used_rate=0.0%, champion=incubating - only 0 replay sample(s); only 0 promotion-test sample(s)
     code_review: status=unobserved, replay=0 (test=0), rules=2, llm_rules=1, llm_judgments=0, candidates=0, best_candidate_score=0.00, rule_pass=0.0%, hard_failures=0, retrieved=0, used_rate=0.0%, champion=unobserved - no online replay or usage signal yet
-  report_file=/Users/xiao_xiong/Desktop/code/BearCode/.bear/skill-evolution/online_eval_report.json
+  report_file=/Users/xiao_xiong/Desktop/code/EvoLoom/.evoloom/skill-evolution/online_eval_report.json
 ```
 
 整体结论是：
@@ -1092,7 +1092,7 @@ Online skill eval:
 `data_dir` 表示评测读取和写入数据的目录：
 
 ```text
-/Users/xiao_xiong/Desktop/code/BearCode/.bear/skill-evolution
+/Users/xiao_xiong/Desktop/code/EvoLoom/.evoloom/skill-evolution
 ```
 
 这里面会存在线自进化日志、使用统计、评测报告和评测产物。
@@ -1174,7 +1174,7 @@ incubating=3, unobserved=1
 `report_file` 是完整 JSON 报告路径：
 
 ```text
-/Users/xiao_xiong/Desktop/code/BearCode/.bear/skill-evolution/online_eval_report.json
+/Users/xiao_xiong/Desktop/code/EvoLoom/.evoloom/skill-evolution/online_eval_report.json
 ```
 
 如果终端摘要不够看，可以打开这个文件查看每个 Skill 的完整来源、规则结果、状态原因和产物路径。

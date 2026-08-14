@@ -52,7 +52,7 @@ def _project_hash() -> str:
 
 def get_memory_dir() -> Path:
     """返回当前项目的 memory 目录，不存在时自动创建。"""
-    d = Path.home() / ".BearCode" / "projects" / _project_hash() / "memory"
+    d = Path.home() / ".evoloom" / "projects" / _project_hash() / "memory"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

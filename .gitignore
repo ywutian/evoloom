@@ -203,8 +203,8 @@ cython_debug/
 # Local runtime and IDE state
 .idea/
 .vscode/
-.bear/sessions/
-.bear/settings.json
+.evoloom/sessions/
+.evoloom/settings.json
 
 # PyPI configuration file
 .pypirc

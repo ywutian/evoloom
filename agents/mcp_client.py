@@ -10,8 +10,8 @@ MCP 客户端模块。
 - 每个 MCP 工具都会被包装成 `mcp__serverName__toolName` 形式，避免和本地工具重名。
 
 配置来源：
-- 全局配置：`~/.bear/settings.json`
-- 项目配置：`.bear/settings.json`
+- 全局配置：`~/.evoloom/settings.json`
+- 项目配置：`.evoloom/settings.json`
 - Claude Code 约定配置：`.mcp.json`
 
 配置格式示例：
@@ -304,12 +304,12 @@ class McpManager:
         """按优先级加载并合并 MCP Server 配置。"""
         merged: dict[str, dict] = {}
 
-        # 1. 全局配置：~/.bear/settings.json
-        global_path = Path.home() / ".bear" / "settings.json"
+        # 1. 全局配置：~/.evoloom/settings.json
+        global_path = Path.home() / ".evoloom" / "settings.json"
         self._merge_config_file(global_path, merged)
 
-        # 2. 当前项目配置：<cwd>/.bear/settings.json
-        project_path = Path.cwd() / ".bear" / "settings.json"
+        # 2. 当前项目配置：<cwd>/.evoloom/settings.json
+        project_path = Path.cwd() / ".evoloom" / "settings.json"
         self._merge_config_file(project_path, merged)
 
         # 3. Claude Code 约定配置：<cwd>/.mcp.json

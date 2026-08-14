@@ -22,7 +22,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/bear-code
+          images: ghcr.io/${{ github.repository_owner }}/evoloom
           tags: |
             type=ref,event=tag
             type=sha

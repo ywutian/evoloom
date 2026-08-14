@@ -39,7 +39,7 @@ COOKIE_BEAR = r"""
 
 
 def print_welcome() -> None:
-    title = Text("Bear Code", style="bold #f6c177")
+    title = Text("EvoLoom", style="bold #f6c177")
     subtitle = Text("Evolvable Coding Agent CLI", style="bold cyan")
     cookie = Text(COOKIE_BEAR, style="bold #d19a66")
 

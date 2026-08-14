@@ -16,7 +16,7 @@ from .tools import get_deferred_tool_names
 # ─── System prompt template (embedded) ──────────────────────
 
 SYSTEM_PROMPT_TEMPLATE = """\
-You are  Bear Code, a lightweight coding assistant CLI.
+You are EvoLoom, a self-evolving coding agent harness.
 You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: Assist with authorized security testing, defensive security, CTF challenges, and educational contexts. Refuse requests for destructive techniques, DoS attacks, mass targeting, supply chain compromise, or detection evasion for malicious purposes. Dual-use security tools (C2 frameworks, credential testing, exploit development) require clear authorization context: pentesting engagements, CTF competitions, security research, or defensive use cases.
@@ -144,8 +144,8 @@ def _resolve_includes(
 
 
 def _load_rules_dir(directory: Path) -> str:
-    """Load all .md files from .bear/rules/ directory."""
-    rules_dir = directory / ".bear" / "rules"
+    """Load all .md files from .evoloom/rules/ directory."""
+    rules_dir = directory / ".evoloom" / "rules"
     if not rules_dir.is_dir():
         return ""
     try:
@@ -182,7 +182,7 @@ def load_claude_md() -> str:
         if parent == d:
             break
         d = parent
-    # Load .bear/rules/*.md from cwd
+    # Load .evoloom/rules/*.md from cwd
     rules = _load_rules_dir(Path.cwd())
     claude_md = ""
     if parts:

@@ -110,7 +110,7 @@ tool_definitions: list[ToolDef] = [
     },
     {
         "name": "skill",
-        "description": "Invoke a registered skill by name. Skills are prompt templates loaded from .bear/skills/. Returns the skill's resolved prompt to follow.",
+        "description": "Invoke a registered skill by name. Skills are prompt templates loaded from .evoloom/skills/. Returns the skill's resolved prompt to follow.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -245,7 +245,7 @@ tool_definitions: list[ToolDef] = [
 
 def get_workspace_root() -> Path:
     """Return the only filesystem root exposed to model-controlled tools."""
-    configured = os.environ.get("BEAR_WORKSPACE")
+    configured = os.environ.get("EVOLOOM_WORKSPACE") or os.environ.get("BEAR_WORKSPACE")
     return Path(configured).expanduser().resolve() if configured else Path.cwd().resolve()
 
 
@@ -592,8 +592,8 @@ def load_permission_rules() -> dict:
     allow: list[dict] = []
     deny: list[dict] = []
 
-    user_settings = _load_settings(Path.home() / ".bear" / "settings.json")
-    project_settings = _load_settings(Path.cwd() / ".bear" / "settings.json")
+    user_settings = _load_settings(Path.home() / ".evoloom" / "settings.json")
+    project_settings = _load_settings(Path.cwd() / ".evoloom" / "settings.json")
 
     for settings in [user_settings, project_settings]:
         if not settings or "permissions" not in settings:

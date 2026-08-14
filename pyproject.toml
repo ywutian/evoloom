@@ -3,8 +3,8 @@ requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bear-code"
-version = "0.1.0"
+name = "evoloom"
+version = "0.2.0"
 description = "A local, extensible coding-agent harness with tools, memory, skills, and MCP support."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-bear-code = "agents.main:main"
+evoloom = "agents.main:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agents"]

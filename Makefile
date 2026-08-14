@@ -13,4 +13,4 @@ quality: lint test
 	uv run python scripts/quality_report.py --check
 
 build:
-	docker build -t bear-code:local .
+	docker build -t evoloom:local .

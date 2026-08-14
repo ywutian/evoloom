@@ -9,7 +9,7 @@
   </defs>
   <rect class="bg" width="1920" height="1080"/>
   <rect class="bluePanel shadow" x="70" y="50" width="1780" height="118" rx="24"/>
-  <text class="title" x="690" y="116">Bear Code 学习路线</text>
+  <text class="title" x="690" y="116">EvoLoom 学习路线</text>
   <text class="small" x="610" y="148">先跑通，再读主链路，再拆子系统，最后做扩展实验</text>
 
   <rect class="panel shadow" x="90" y="230" width="1740" height="640" rx="24"/>

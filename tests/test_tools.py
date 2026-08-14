@@ -9,7 +9,7 @@ from agents.tools import _resolve_tool_path, check_permission, is_dangerous
 
 @pytest.fixture
 def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("BEAR_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("EVOLOOM_WORKSPACE", str(tmp_path))
     return tmp_path
 
 
@@ -18,6 +18,15 @@ def test_relative_path_resolves_inside_workspace(workspace: Path) -> None:
     target.parent.mkdir()
     target.write_text("print('ok')\n")
     assert _resolve_tool_path("src/app.py") == target
+
+
+def test_legacy_workspace_variable_remains_supported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("EVOLOOM_WORKSPACE", raising=False)
+    monkeypatch.setenv("BEAR_WORKSPACE", str(tmp_path))
+    target = tmp_path / "README.md"
+    target.write_text("legacy config")
+
+    assert _resolve_tool_path("README.md") == target
 
 
 def test_absolute_path_outside_workspace_is_rejected(workspace: Path) -> None:

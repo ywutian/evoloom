@@ -280,7 +280,7 @@ class Agent:
 
     # 生成一个用于保存 AI 计划（Plan）的 Markdown 文件的绝对路径。
     def _generate_plan_file_path(self) -> str:
-        d = Path.home() / ".bear" / "plans"
+        d = Path.home() / ".evoloom" / "plans"
         d.mkdir(parents=True, exist_ok=True)
         return str(d / f"plan-{self.session_id}.md")
 
@@ -605,7 +605,14 @@ class Agent:
         return self.permission_mode in {"bypassPermissions", "acceptEdits"}
 
     def _online_evolution_enabled(self) -> bool:
-        raw = os.environ.get("BEAR_AUTO_SKILL_EVOLUTION", "1").strip().lower()
+        raw = (
+            os.environ.get(
+                "EVOLOOM_AUTO_SKILL_EVOLUTION",
+                os.environ.get("BEAR_AUTO_SKILL_EVOLUTION", "1"),
+            )
+            .strip()
+            .lower()
+        )
         return raw not in {"0", "false", "no", "off"}
 
     def _schedule_background_skill_task(self, coro) -> None:
@@ -691,7 +698,10 @@ class Agent:
             confirm_write=self._confirm_online_skill_write
             if interactive_confirm
             else self._confirm_background_online_skill_write,
-            target=os.environ.get("BEAR_AUTO_SKILL_TARGET", "project"),
+            target=os.environ.get(
+                "EVOLOOM_AUTO_SKILL_TARGET",
+                os.environ.get("BEAR_AUTO_SKILL_TARGET", "project"),
+            ),
         )
         if result.get("ok"):
             if result.get("action") in {"add", "merge"}:
@@ -1126,7 +1136,7 @@ class Agent:
         if (len(result.encode())) <= THRESHOLD:
             return result
 
-        d = Path.home() / ".bear-code" / "tool-results"
+        d = Path.home() / ".evoloom" / "tool-results"
         d.mkdir(parents=True, exist_ok=True)
         filename = f"{int(time.time() * 1000)}-{tool_name}.txt"
         filepath = d / filename

@@ -85,11 +85,11 @@ def discover_skills() -> list[SkillDefinition]:
         return _cached_skills
 
     skills: dict[str, SkillDefinition] = {}
-    # 用户级 skills 优先级最高：~/.bear/skills/<name>/SKILL.md
-    user_dir = Path.home() / ".bear" / "skills"
+    # 用户级 skills 优先级最高：~/.evoloom/skills/<name>/SKILL.md
+    user_dir = Path.home() / ".evoloom" / "skills"
     _load_skills_from_dir(user_dir, "user", skills)
-    # 项目级 skills 优先级较低：<cwd>/.bear/skills/<name>/SKILL.md
-    project_dir = Path.cwd() / ".bear" / "skills"
+    # 项目级 skills 优先级较低：<cwd>/.evoloom/skills/<name>/SKILL.md
+    project_dir = Path.cwd() / ".evoloom" / "skills"
     _load_skills_from_dir(project_dir, "project", skills, overwrite=False)
 
     _cached_skills = list(skills.values())
@@ -99,7 +99,7 @@ def discover_skills() -> list[SkillDefinition]:
 def _load_skills_from_dir(
     base_dir: Path, source: str, skills: dict[str, SkillDefinition], overwrite: bool = True
 ) -> None:
-    # 只加载目录形式的 skill，不加载 .bear/skills/foo.md 这种单文件形式。
+    # 只加载目录形式的 skill，不加载 .evoloom/skills/foo.md 这种单文件形式。
     if not base_dir.is_dir():
         return
     for entry in base_dir.iterdir():
@@ -193,7 +193,7 @@ def build_skill_descriptions() -> str:
     lines.append("")
     lines.append("# Skill Evolution")
     lines.append(
-        "Bear Code has an online skill evolution loop after each assistant response. Do not create or evolve skills during normal task execution unless the user explicitly asks for manual skill maintenance."
+        "EvoLoom has an online skill evolution loop after each assistant response. Do not create or evolve skills during normal task execution unless the user explicitly asks for manual skill maintenance."
     )
     lines.append(
         "If manual maintenance is explicitly requested, call `skill_evolve` only for durable reusable feedback on an existing skill, and call `skill_create` only when no suitable existing skill exists."

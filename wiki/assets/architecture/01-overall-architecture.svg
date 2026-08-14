@@ -9,7 +9,7 @@
   </defs>
   <rect class="bg" width="1920" height="1280"/>
   <rect class="bluePanel shadow" x="40" y="34" width="1840" height="120" rx="24"/>
-  <text class="title" x="610" y="108">Bear Code 总体架构</text>
+  <text class="title" x="610" y="108">EvoLoom 总体架构</text>
   <text class="small" x="620" y="138">Agentic Harness · 自进化 Skills · Memory · MCP · 子 Agent</text>
 
   <rect class="panel shadow" x="60" y="210" width="360" height="760" rx="22"/>
@@ -39,10 +39,10 @@
 
   <rect class="panel shadow" x="1480" y="210" width="360" height="760" rx="22"/>
   <text class="section" x="1566" y="260">外部与存储</text>
-  <rect class="card greenCard" x="1520" y="310" width="280" height="105" rx="18"/><text class="label" x="1588" y="352">Memory</text><text class="small" x="1555" y="386">~/.BearCode</text>
-  <rect class="card purpleCard" x="1520" y="450" width="280" height="105" rx="18"/><text class="label" x="1588" y="492">Skills</text><text class="small" x="1548" y="526">.bear/skills</text>
+  <rect class="card greenCard" x="1520" y="310" width="280" height="105" rx="18"/><text class="label" x="1588" y="352">Memory</text><text class="small" x="1555" y="386">~/.EvoLoom</text>
+  <rect class="card purpleCard" x="1520" y="450" width="280" height="105" rx="18"/><text class="label" x="1588" y="492">Skills</text><text class="small" x="1548" y="526">.evoloom/skills</text>
   <rect class="card orangeCard" x="1520" y="590" width="280" height="105" rx="18"/><text class="label" x="1588" y="632">MCP</text><text class="small" x="1542" y="666">外部工具 Server</text>
-  <rect class="card blueCard" x="1520" y="730" width="280" height="105" rx="18"/><text class="label" x="1588" y="772">Session</text><text class="small" x="1548" y="806">~/.bear-code</text>
+  <rect class="card blueCard" x="1520" y="730" width="280" height="105" rx="18"/><text class="label" x="1588" y="772">Session</text><text class="small" x="1548" y="806">~/.evoloom</text>
   <path class="line" d="M1380 368H1480"/><path class="line" d="M1380 748H1480"/><path class="line" d="M1380 558H1480"/><path class="line" d="M1380 642H1480"/>
 
   <rect class="bluePanel shadow" x="160" y="1040" width="1600" height="150" rx="22"/>

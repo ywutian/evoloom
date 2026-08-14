@@ -32,5 +32,5 @@
 
   <rect class="card" x="260" y="790" width="1400" height="120" rx="18"/>
   <text class="section" x="810" y="840">可进化</text>
-  <text class="small" x="360" y="882">当用户给出明确、稳定、未来可复用的反馈时，Bear Code 可以新增 Skill 或合并进已有 Skill，并保存版本快照和来源记录。</text>
+  <text class="small" x="360" y="882">当用户给出明确、稳定、未来可复用的反馈时，EvoLoom 可以新增 Skill 或合并进已有 Skill，并保存版本快照和来源记录。</text>
 </svg>

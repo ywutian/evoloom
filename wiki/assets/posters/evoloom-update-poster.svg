@@ -2,7 +2,7 @@
   <defs><style>.bg{fill:#fbfcfb}.header{fill:#eef6ff;stroke:#c9d7e9;stroke-width:1.6}.panel{fill:#f7fcf9;stroke:#cfe3d7;stroke-width:1.5}.card{fill:#fff;stroke:#d7e1df;stroke-width:1.4}.blue{fill:#3165b7}.green{fill:#14945b}.orange{fill:#f47d22}.purple{fill:#6045a9}.title{font:800 58px "PingFang SC","Microsoft YaHei",Arial;fill:#13213b}.subtitle{font:700 26px "PingFang SC","Microsoft YaHei",Arial;fill:#08733d}.body{font:500 22px "PingFang SC","Microsoft YaHei",Arial;fill:#25324b}.section{font:800 31px "PingFang SC","Microsoft YaHei",Arial;fill:#08733d}.label{font:800 24px "PingFang SC","Microsoft YaHei",Arial;fill:#17243d}.small{font:500 18px "PingFang SC","Microsoft YaHei",Arial;fill:#25324b}.muted{font:500 18px "PingFang SC","Microsoft YaHei",Arial;fill:#657284}.shadow{filter:url(#shadow)}</style><filter id="shadow"><feDropShadow dx="0" dy="7" stdDeviation="9" flood-color="#d8e1df" flood-opacity=".42"/></filter></defs>
   <rect class="bg" width="1080" height="1440"/>
   <rect class="header shadow" x="36" y="34" width="1008" height="230" rx="24"/>
-  <text class="title" x="72" y="112">Bear Code 升级了</text>
+  <text class="title" x="72" y="112">EvoLoom 升级了</text>
   <text class="subtitle" x="74" y="162">自进化 Skills · Agentic Harness · MCP 工具扩展</text>
   <text class="body" x="74" y="208">一个能把用户反馈沉淀成长期技能的命令行 Coding Agent</text>
   <rect class="panel shadow" x="36" y="300" width="1008" height="230" rx="22"/>
@@ -25,6 +25,6 @@
   <text class="label" x="112" y="1084">政府报告撰写-正式书面化与政策结合</text>
   <text class="muted" x="112" y="1122">来自用户反馈：字数控制、书面化表达、结合国家政策</text>
   <text class="body" x="74" y="1208">审计产物：online_provenance.jsonl / skill_usage_stats.json / usage.jsonl</text>
-  <text class="subtitle" x="300" y="1340">Bear Code · Evolvable CLI Coding Agent</text>
+  <text class="subtitle" x="300" y="1340">EvoLoom · Evolvable CLI Coding Agent</text>
 </svg>
 

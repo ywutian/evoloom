@@ -1,8 +1,8 @@
-# Bear Agent
+# EvoLoom
 
-Bear Agent 是一个基于 Python 实现的 **自进化 Harness Agent**。它不是简单的命令行聊天工具，而是一个可运行、可阅读、可扩展的本地 Coding Agent Runtime：统一编排大模型推理、工具调用、文件编辑、Shell 执行、权限控制、长期记忆、Skills、自进化、MCP 外部工具、子 Agent 和会话恢复。
+EvoLoom 是一个基于 Python 实现的 **自进化 Coding Agent Harness**。名字由 Evolution 与 Loom 组合而来：它把模型推理、工具调用、文件编辑、Shell、权限、Memory、Skills、MCP、子 Agent 和用户反馈编织成一个持续进化的执行闭环。
 
-项目重点是 **Harness**：模型只负责推理和提出工具调用意图，真正的环境操作由 Bear Code Runtime 统一做权限判断、工具执行、结果回写、上下文压缩和经验沉淀。它适合学习 Claude Code 类工具的底层机制，也适合作为个人 Coding Agent、项目分析助手或领域 Agent 的二次开发基础。
+项目重点是 **Harness**：模型只负责推理和提出工具调用意图，真正的环境操作由 EvoLoom Runtime 统一做权限判断、工具执行、结果回写、上下文压缩和经验沉淀。它适合学习 Claude Code 类工具的底层机制，也适合作为个人 Coding Agent、项目分析助手或领域 Agent 的二次开发基础。
 
 ## 核心亮点
 
@@ -18,7 +18,7 @@ Bear Agent 是一个基于 Python 实现的 **自进化 Harness Agent**。它不
 
 ## 项目架构
 
-![Bear Agent 总体架构](wiki/assets/architecture/01-overall-architecture.svg)
+![EvoLoom 总体架构](wiki/assets/architecture/01-overall-architecture.svg)
 
 核心运行链路：
 
@@ -39,7 +39,7 @@ Bear Agent 是一个基于 Python 实现的 **自进化 Harness Agent**。它不
 ## 目录结构
 
 ```text
-BearAgent/
+EvoLoom/
 ├── agents/
 │   ├── main.py                    # CLI 入口、REPL、参数解析
 │   ├── agent.py                   # Agent Runtime、模型调用、工具调度、上下文压缩
@@ -53,7 +53,7 @@ BearAgent/
 │   ├── subagent.py                # 子 Agent 配置
 │   ├── session.py                 # 会话保存与恢复
 │   └── ui.py                      # 终端 UI 输出
-├── .bear/
+├── .evoloom/
 │   ├── skills/                    # 项目级 Skills
 │   └── skill-evolution/           # Skills 自进化审计产物
 ├── wiki/                          # 项目文档中心
@@ -121,7 +121,7 @@ MODEL=deepseek-chat
 ### 3. 启动 REPL
 
 ```bash
-uv run bear-code
+uv run evoloom
 ```
 
 启动后直接输入任务，例如：
@@ -133,7 +133,7 @@ uv run bear-code
 ### 4. 执行一次性任务
 
 ```bash
-uv run bear-code "总结这个项目的目录结构和核心模块"
+uv run evoloom "总结这个项目的目录结构和核心模块"
 ```
 
 ### 5. 使用 Plan Mode
@@ -141,7 +141,7 @@ uv run bear-code "总结这个项目的目录结构和核心模块"
 Plan Mode 适合重构、复杂修复和多文件修改。它会先只读分析和写计划，用户审批后再执行。
 
 ```bash
-uv run bear-code --plan "分析 Skills 检索逻辑应该如何优化"
+uv run evoloom --plan "分析 Skills 检索逻辑应该如何优化"
 ```
 
 REPL 中也可以输入：
@@ -153,38 +153,40 @@ REPL 中也可以输入：
 ### 6. 恢复最近会话
 
 ```bash
-uv run bear-code --resume
+uv run evoloom --resume
 ```
 
 ## 如何让项目自动沉淀并进化 Skills
 
-Bear Code 的核心特色是 **自进化 Skills**。它可以从用户明确反馈中抽取未来可复用的规则，并自动新增或合并到项目级或用户级 `SKILL.md`。
+EvoLoom 的核心特色是 **自进化 Skills**。它可以从用户明确反馈中抽取未来可复用的规则，并自动新增或合并到项目级或用户级 `SKILL.md`。
 
 ### 1. 开启自动自进化
 
-默认 `BEAR_AUTO_SKILL_EVOLUTION` 是开启的。为了明确配置，建议在 `.env` 中写：
+默认 `EVOLOOM_AUTO_SKILL_EVOLUTION` 是开启的。为了明确配置，建议在 `.env` 中写：
 
 ```env
-BEAR_AUTO_SKILL_EVOLUTION=1
-BEAR_AUTO_SKILL_TARGET=project
+EVOLOOM_AUTO_SKILL_EVOLUTION=1
+EVOLOOM_AUTO_SKILL_TARGET=project
 ```
 
 含义：
 
-- `BEAR_AUTO_SKILL_EVOLUTION=1`：启用在线 Skill 自进化。
-- `BEAR_AUTO_SKILL_TARGET=project`：自动新增的 Skill 写入当前项目 `.bear/skills/`。
+- `EVOLOOM_AUTO_SKILL_EVOLUTION=1`：启用在线 Skill 自进化。
+- `EVOLOOM_AUTO_SKILL_TARGET=project`：自动新增的 Skill 写入当前项目 `.evoloom/skills/`。
+
+升级兼容：运行时仍读取旧版 `BEAR_*` 环境变量作为后备，但新配置应统一使用 `EVOLOOM_*`。
 
 如果希望沉淀为所有项目共享的个人 Skill：
 
 ```env
-BEAR_AUTO_SKILL_TARGET=user
+EVOLOOM_AUTO_SKILL_TARGET=user
 ```
 
 对应路径：
 
 ```text
-project: <project>/.bear/skills/<skill_name>/SKILL.md
-user:    ~/.bear/skills/<skill_name>/SKILL.md
+project: <project>/.evoloom/skills/<skill_name>/SKILL.md
+user:    ~/.evoloom/skills/<skill_name>/SKILL.md
 ```
 
 ### 2. 用允许写入的权限模式启动
@@ -192,15 +194,15 @@ user:    ~/.bear/skills/<skill_name>/SKILL.md
 后台自动写入 Skill 需要当前权限模式允许写文件。推荐使用：
 
 ```bash
-BEAR_AUTO_SKILL_EVOLUTION=1 \
-BEAR_AUTO_SKILL_TARGET=project \
-python3 -m agents.main --accept-edits
+EVOLOOM_AUTO_SKILL_EVOLUTION=1 \
+EVOLOOM_AUTO_SKILL_TARGET=project \
+uv run evoloom --accept-edits
 ```
 
 也可以使用更激进的模式：
 
 ```bash
-python3 -m agents.main --yolo
+uv run evoloom --yolo
 ```
 
 不建议长期默认使用 `--yolo`，因为它会跳过确认。日常推荐 `--accept-edits`，既能让后台 Skill 写入正常发生，又不会绕过所有权限判断。
@@ -255,12 +257,12 @@ agents/skill_evolution.py
 审计产物：
 
 ```text
-.bear/skill-evolution/usage.jsonl
-.bear/skill-evolution/online_provenance.jsonl
-.bear/skill-evolution/online_skill_provenance.json
-.bear/skill-evolution/skill_usage_stats.json
-.bear/skill-evolution/history/
-.bear/skill-evolution/pruned/
+.evoloom/skill-evolution/usage.jsonl
+.evoloom/skill-evolution/online_provenance.jsonl
+.evoloom/skill-evolution/online_skill_provenance.json
+.evoloom/skill-evolution/skill_usage_stats.json
+.evoloom/skill-evolution/history/
+.evoloom/skill-evolution/pruned/
 ```
 
 ### 5. 手动触发当前窗口抽取
@@ -331,8 +333,8 @@ Skill 是一个可复用能力说明文件，通常是一个带 frontmatter 的 
 Skill 路径：
 
 ```text
-用户级：~/.bear/skills/<skill_name>/SKILL.md
-项目级：<project>/.bear/skills/<skill_name>/SKILL.md
+用户级：~/.evoloom/skills/<skill_name>/SKILL.md
+项目级：<project>/.evoloom/skills/<skill_name>/SKILL.md
 ```
 
 示例：
@@ -363,13 +365,13 @@ Skill 和 Memory 的区别：
 
 ## MCP 支持
 
-Bear Code 支持 MCP 外部工具扩展。MCP Server 可以通过 stdio JSON-RPC 暴露工具，Bear Code 会将其包装为 Agent 可调用工具。
+EvoLoom 支持 MCP 外部工具扩展。MCP Server 可以通过 stdio JSON-RPC 暴露工具，EvoLoom 会将其包装为 Agent 可调用工具。
 
 配置来源：
 
 ```text
-~/.bear/settings.json
-<project>/.bear/settings.json
+~/.evoloom/settings.json
+<project>/.evoloom/settings.json
 <project>/.mcp.json
 ```
 
@@ -400,7 +402,7 @@ mcp__<serverName>__<toolName>
 构建镜像：
 
 ```bash
-docker build -t bear-code .
+docker build -t evoloom .
 ```
 
 启动交互式会话：
@@ -409,9 +411,8 @@ docker build -t bear-code .
 docker run --rm -it \
   --env-file .env \
   -v "$PWD:/workspace" \
-  -v bear-code-sessions:/home/bear/.bear-code \
-  -v bear-code-memory:/home/bear/.BearCode \
-  bear-code
+  -v evoloom-data:/home/evoloom/.evoloom \
+  evoloom
 ```
 
 允许自动沉淀 Skills：
@@ -419,15 +420,14 @@ docker run --rm -it \
 ```bash
 docker run --rm -it \
   --env-file .env \
-  -e BEAR_AUTO_SKILL_EVOLUTION=1 \
-  -e BEAR_AUTO_SKILL_TARGET=project \
+  -e EVOLOOM_AUTO_SKILL_EVOLUTION=1 \
+  -e EVOLOOM_AUTO_SKILL_TARGET=project \
   -v "$PWD:/workspace" \
-  -v bear-code-sessions:/home/bear/.bear-code \
-  -v bear-code-memory:/home/bear/.BearCode \
-  bear-code --accept-edits
+  -v evoloom-data:/home/evoloom/.evoloom \
+  evoloom --accept-edits
 ```
 
-镜像使用 UID `10001` 的非 root 用户，并将模型可访问的文件范围限制在 `BEAR_WORKSPACE=/workspace`。Shell 在默认模式下始终需要确认；无人值守环境应使用 `--dont-ask` 和显式权限规则。
+镜像使用 UID `10001` 的非 root 用户，并将模型可访问的文件范围限制在 `EVOLOOM_WORKSPACE=/workspace`。Shell 在默认模式下始终需要确认；无人值守环境应使用 `--dont-ask` 和显式权限规则。
 
 ## 工程质量闭环
 
@@ -451,20 +451,20 @@ make quality
 发布版本时创建 `v*` Git tag，GitHub Actions 会构建并推送：
 
 ```text
-ghcr.io/<github-owner>/bear-code:<tag>
+ghcr.io/<github-owner>/evoloom:<tag>
 ```
 
 ## 重要数据路径
 
 | 数据 | 路径 |
 |------|------|
-| 项目级 Skills | `.bear/skills/<skill_name>/SKILL.md` |
-| 用户级 Skills | `~/.bear/skills/<skill_name>/SKILL.md` |
-| Skills 自进化审计 | `.bear/skill-evolution/` |
-| 长期记忆 | `~/.BearCode/projects/<project_hash>/memory/` |
-| 会话历史 | `~/.bear-code/sessions/` |
-| 大工具结果 | `~/.bear-code/tool-results/` |
-| Plan Mode 计划 | `~/.bear/plans/` |
+| 项目级 Skills | `.evoloom/skills/<skill_name>/SKILL.md` |
+| 用户级 Skills | `~/.evoloom/skills/<skill_name>/SKILL.md` |
+| Skills 自进化审计 | `.evoloom/skill-evolution/` |
+| 长期记忆 | `~/.evoloom/projects/<project_hash>/memory/` |
+| 会话历史 | `~/.evoloom/sessions/` |
+| 大工具结果 | `~/.evoloom/tool-results/` |
+| Plan Mode 计划 | `~/.evoloom/plans/` |
 
 ## 文档入口
 
@@ -481,7 +481,7 @@ ghcr.io/<github-owner>/bear-code:<tag>
 
 ## 适合如何使用
 
-Bear Code 适合：
+EvoLoom 适合：
 
 - 学习 Claude Code 类工具的 Agent Loop 和工具调用机制。
 - 学习如何做本地文件编辑型 Agent 的权限控制。
@@ -489,4 +489,4 @@ Bear Code 适合：
 - 扩展成个人 Coding Agent。
 - 扩展成带长期记忆和可复用经验沉淀的领域 Agent。
 
-如果只看一个核心点：Bear Code 是一个会把稳定用户反馈沉淀成 Skills 的 **自进化 Harness Agent**。
+如果只看一个核心点：EvoLoom 是一个会把稳定用户反馈沉淀成 Skills 的 **自进化 Harness Agent**。
