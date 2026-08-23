@@ -1,0 +1,20 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    id: pull-cache
+    args:
+      - pull
+      - ${_IMAGE}
+    allowFailure: true
+  - name: gcr.io/cloud-builders/docker
+    id: build
+    args:
+      - build
+      - --cache-from
+      - ${_IMAGE}
+      - --file
+      - Dockerfile.cloudrun
+      - --tag
+      - ${_IMAGE}
+      - .
+images:
+  - ${_IMAGE}

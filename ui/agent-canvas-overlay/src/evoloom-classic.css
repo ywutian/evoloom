@@ -1,0 +1,172 @@
+:root {
+  --oh-color-primary: #73c9ae;
+  --oh-color-logo: #73c9ae;
+  --oh-color-base: #0b1211;
+  --oh-color-base-secondary: #0e1715;
+  --oh-color-tertiary: #1a2925;
+  --oh-color-tertiary-light: #b8cbc5;
+  --oh-color-content: #dce8e4;
+  --oh-color-content-2: #f4f8f6;
+  --oh-background: #0b1211;
+  --oh-foreground: #dce8e4;
+  --oh-surface: #111c19;
+  --oh-surface-foreground: #e7efec;
+  --oh-surface-raised: #182521;
+  --oh-surface-deep: #08100e;
+  --oh-overlay: #13201d;
+  --oh-overlay-foreground: #eef5f2;
+  --oh-muted: #91a49e;
+  --oh-text-secondary: #b8c8c3;
+  --oh-text-tertiary: #ccd9d5;
+  --oh-text-dim: #70837d;
+  --oh-text-subtle: #60736d;
+  --oh-interactive-hover: #274039;
+  --oh-interactive-hover-low: #14211e;
+  --oh-interactive-active: #20352f;
+  --oh-interactive-selected: #315b4e;
+  --oh-scrollbar: rgb(115 201 174 / 28%);
+  --oh-scrollbar-hover: rgb(115 201 174 / 48%);
+  --oh-default: #1a2925;
+  --oh-default-foreground: #e7efec;
+  --oh-accent: #73c9ae;
+  --oh-accent-foreground: #07100d;
+  --oh-success: #72c49a;
+  --oh-success-foreground: #07100d;
+  --oh-warning: #d58a55;
+  --oh-warning-foreground: #160c05;
+  --oh-danger: #e47768;
+  --oh-danger-foreground: #fff7f5;
+  --oh-segment: #111c19;
+  --oh-segment-foreground: #dce8e4;
+  --oh-border: #31443e;
+  --oh-border-input: #3c514a;
+  --oh-border-subtle: #22332e;
+  --oh-separator: rgb(115 201 174 / 18%);
+  --oh-focus: #8ee2c7;
+  --oh-status-success: #72c49a;
+  --oh-status-error: #e47768;
+  --oh-link: #a7e2cf;
+  --oh-radius: 8px;
+  --oh-field-radius: 8px;
+}
+
+html {
+  background: var(--oh-background);
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  letter-spacing: -0.005em;
+}
+
+::selection {
+  color: #f7fbf9;
+  background: rgb(49 107 90 / 78%);
+}
+
+:where(button, a, input, textarea, select, [role="button"]):focus-visible {
+  outline: 2px solid var(--oh-focus) !important;
+  outline-offset: 2px;
+}
+
+.evoloom-wordmark {
+  display: inline-flex;
+  width: auto;
+  min-width: max-content;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding-inline: 0.25rem;
+  color: var(--oh-accent);
+  border-radius: 7px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  text-decoration: none;
+}
+
+.evoloom-wordmark:hover {
+  color: #a9ead5;
+  background: var(--oh-interactive-hover-low);
+}
+
+.evoloom-mark {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+aside[data-collapsed="true"] .evoloom-wordmark span {
+  display: none;
+}
+
+/* Public mode keeps the familiar Canvas shell without advertising disabled tools. */
+[data-testid="sidebar-onboarding-checklist"],
+[data-testid="sidebar-skills-link"],
+[data-testid="sidebar-automations-link"],
+[data-testid="open-workspace-button"],
+[data-testid="open-plugin-picker"] {
+  display: none !important;
+}
+
+[data-testid="home-chat-launcher"] {
+  padding-top: clamp(4.5rem, 19vh, 10rem) !important;
+}
+
+[data-testid="home-chat-launcher"] h1 {
+  max-width: 18ch;
+  color: #f1f7f4;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+}
+
+[data-testid="home-chat-launcher"] .chat-input::before {
+  color: var(--oh-text-dim);
+}
+
+[data-testid="home-chat-launcher"] div:has(> .chat-input) {
+  border-radius: 8px;
+}
+
+aside[data-collapsed="false"] {
+  position: relative;
+  background: #0d1614;
+}
+
+aside[data-collapsed="false"]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(90deg, #73c9ae 0 72%, #d58a55 72% 100%);
+  opacity: 0.82;
+}
+
+code,
+pre,
+[class*="font-mono"] {
+  font-variant-ligatures: none;
+}
+
+@media (max-width: 767px) {
+  [data-testid="home-chat-launcher"] {
+    padding-top: 4rem !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

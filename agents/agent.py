@@ -103,6 +103,19 @@ MODEL_CONTEXT = {
     "claude-opus-4-20250514": 200000,
     "gpt-4o": 128000,
     "gpt-4o-mini": 128000,
+    "gpt-5.4": 200000,
+    "gpt-5.5": 200000,
+    "gpt-5.4-pro": 200000,
+    "gpt-5.3-codex": 200000,
+    "gpt-5.3-codex-spark": 200000,
+    "gpt-5.1-codex-max": 200000,
+    "gpt-5.1-codex": 200000,
+    "gpt-5.1-codex-mini": 200000,
+    "gpt-5.1-2025-11-13": 200000,
+    "gpt-5-2025-08-07": 200000,
+    "gpt-5.6-sol": 200000,
+    "gpt-5.6-terra": 200000,
+    "gpt-5.6-luna": 200000,
     "deepseek-chat": 200000,
 }
 
@@ -163,6 +176,7 @@ class Agent:
         custom_system_prompt: str | None = None,
         custom_tools: list[ToolDef] | None = None,
         is_sub_agent: bool = False,
+        text_callback: Callable[[str], None] | None = None,
     ):
         self.permission_mode = permission_mode
         self.thinking = thinking
@@ -173,6 +187,7 @@ class Agent:
         self.max_cost_usd = max_cost_usd
         self.max_turns = max_turns
         self.confirm_fn = confirm_fn
+        self._text_callback = text_callback
         self._custom_system_prompt = custom_system_prompt
         self.effective_window = _get_context_windows(model) - 20000
         self.session_id = uuid.uuid4().hex[:8]
@@ -254,6 +269,12 @@ class Agent:
             self._openai_client = None
 
         self._refresh_runtime_system_prompt()
+
+    def set_model(self, model: str) -> None:
+        """Switch the inference model while preserving the current conversation."""
+        self.model = model
+        self.effective_window = _get_context_windows(model) - 20000
+        self._thinking_mode = self._resolve_thinking_mode()
 
     # 判断返回模型的思考模式
     def _resolve_thinking_mode(self) -> str:
@@ -483,11 +504,13 @@ class Agent:
     # 决定是把文本存进缓冲区，还是直接打印到终端。
     def _emit_text(self, text: str) -> None:
         text = _safe_utf8_text(text)
+        if self._text_callback is not None:
+            self._text_callback(text)
         if self._turn_output_buffer is not None:
             self._turn_output_buffer.append(text)
         if self._output_buffer is not None:
             self._output_buffer.append(text)
-        else:
+        elif self._text_callback is None:
             print_assistant_text(text)
 
     def _build_fold_guidance_section(self) -> str:

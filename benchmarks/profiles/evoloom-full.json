@@ -1,0 +1,20 @@
+{
+  "name": "evoloom-full",
+  "command": [
+    "uv",
+    "run",
+    "--project",
+    "{project_root}",
+    "evoloom",
+    "--yolo",
+    "--max-cost",
+    "0.50",
+    "--max-turns",
+    "20",
+    "{prompt}"
+  ],
+  "env": {
+    "EVOLOOM_AUTO_SKILL_EVOLUTION": "0"
+  },
+  "isolate_home": true
+}

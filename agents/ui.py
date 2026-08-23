@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 import time
@@ -13,7 +14,8 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-console = Console(highlight=False)
+_STDIO_PROTOCOL = os.environ.get("EVOLOOM_STDIO_PROTOCOL") == "1"
+console = Console(highlight=False, stderr=_STDIO_PROTOCOL)
 
 # ─── Basic output ──────────────────────────────────────────
 
@@ -23,8 +25,9 @@ def _safe_text(value: object) -> str:
 
 
 def _safe_stdout_write(text: object) -> None:
-    sys.stdout.write(_safe_text(text))
-    sys.stdout.flush()
+    stream = sys.stderr if _STDIO_PROTOCOL else sys.stdout
+    stream.write(_safe_text(text))
+    stream.flush()
 
 
 COOKIE_BEAR = r"""

@@ -4,15 +4,18 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evoloom"
-version = "0.2.0"
+version = "0.3.0"
 description = "A local, extensible coding-agent harness with tools, memory, skills, and MCP support."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "LICENSES/*"]
 requires-python = ">=3.11,<3.14"
 dependencies = [
+  "agent-client-protocol>=0.12,<1",
   "anthropic>=0.49,<1",
-  "openai>=1.68,<2",
+  "openai>=1.68,<3",
   "python-dotenv>=1.0,<2",
-  "rich>=13.9,<15",
+  "rich>=13.9,<16",
   "tqdm>=4.67,<5",
 ]
 
@@ -26,6 +29,7 @@ dev = [
 
 [project.scripts]
 evoloom = "agents.main:main"
+evoloom-acp = "agents.acp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agents"]

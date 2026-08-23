@@ -1,8 +1,37 @@
 # EvoLoom
 
+[![CI](https://github.com/ywutian/evoloom/actions/workflows/ci.yml/badge.svg)](https://github.com/ywutian/evoloom/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/ywutian/evoloom/actions/workflows/codeql.yml/badge.svg)](https://github.com/ywutian/evoloom/actions/workflows/codeql.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-0f5c49.svg)](LICENSE)
+[![Python 3.11-3.13](https://img.shields.io/badge/python-3.11--3.13-102a24.svg)](pyproject.toml)
+
+**A local, self-evolving coding-agent harness that makes model reasoning,
+tools, permissions, memory, skills, MCP, and subagents work as one auditable
+runtime.**
+
+[Live demo](https://evoloom-demo-l6qfiq5rgq-uc.a.run.app) ·
+[Architecture](wiki/架构设计.md) ·
+[Deployment](DEPLOY_GCP.md) ·
+[Evaluation evidence](BENCHMARK.md)
+
 EvoLoom 是一个基于 Python 实现的 **自进化 Coding Agent Harness**。名字由 Evolution 与 Loom 组合而来：它把模型推理、工具调用、文件编辑、Shell、权限、Memory、Skills、MCP、子 Agent 和用户反馈编织成一个持续进化的执行闭环。
 
 项目重点是 **Harness**：模型只负责推理和提出工具调用意图，真正的环境操作由 EvoLoom Runtime 统一做权限判断、工具执行、结果回写、上下文压缩和经验沉淀。它适合学习 Claude Code 类工具的底层机制，也适合作为个人 Coding Agent、项目分析助手或领域 Agent 的二次开发基础。
+
+## 在线 Demo
+
+公开 Demo 使用经典 Agent Canvas 界面，通过 EvoLoom ACP adapter 调用受限的
+Coding Agent Runtime。访客无需登录，但它是个人作品展示环境，不是托管开发
+平台：
+
+- 每个浏览器的会话通过签名 HttpOnly Cookie 隔离；
+- 会话和归属 Cookie 最多保留 30 天；
+- Shell、Secret、插件写入、任意文件访问和 Skills 写入均被禁用；
+- 每个任务最多 20 轮，并有访客、客户端、全局小时和每日会话限制；
+- 模型目录由服务端白名单提供，具体可用性取决于部署者的 provider；
+- 不要在公共 Demo 中输入源代码、凭证或其他隐私数据。
+
+Demo 的安全边界和可复现部署步骤见 [DEPLOY_GCP.md](DEPLOY_GCP.md)。
 
 ## 核心亮点
 
@@ -446,7 +475,7 @@ make quality
 - `quality-budget.json` 中的复杂度、函数长度、宽泛异常和测试数量预算。
 - Docker 镜像构建验证。
 
-`scripts/quality_report.py` 输出 JSON 指标。优化一个模块后，应同步收紧 `quality-budget.json`，保证质量只能改善、不能静默回退。当前 15% 覆盖率只是从原来 0 个项目测试建立的首个基线，目标是核心 Agent Loop、权限和工具模块达到 95%，全项目达到 80%。
+`scripts/quality_report.py` 输出 JSON 指标。优化一个模块后，应同步收紧 `quality-budget.json`，保证质量只能改善、不能静默回退。覆盖率门槛目前是早期基线，不代表生产级测试充分性；新增功能应优先覆盖权限、持久化、模型白名单和 Agent Loop 等高风险路径。
 
 发布版本时创建 `v*` Git tag，GitHub Actions 会构建并推送：
 
@@ -474,10 +503,10 @@ ghcr.io/<github-owner>/evoloom:<tag>
 |------|------|
 | [学习说明](wiki/从0到1学习了解项目.md) | 面向学习者的完整项目说明 |
 | [架构设计](wiki/架构设计.md) | 系统分层、主链路、模块边界和数据流 |
-| [核心源码阅读指南](wiki/核心源码阅读指南.md) | 按源码顺序学习 Agent Loop、工具、Skills、Memory、MCP 和自进化 |
 | [技术亮点](wiki/技术亮点.md) | 技术亮点和核心代码讲解 |
-| [Skills 自进化逻辑](wiki/Skills自进化逻辑与实现思路.md) | 自进化设计和实现取舍 |
-| [简历包装](wiki/简历包装.md) | 简历 bullet、面试表达和项目包装 |
+| [可复现评测](BENCHMARK.md) | Coding Agent 任务格式、隔离运行、结果证据和公平对比要求 |
+| [评测证据状态](wiki/评测部分.md) | 当前可复现证据、禁止外推的结论和正式发布门槛 |
+| [研究参考](REFERENCES.md) | 影响项目设计的公开论文与官方来源链接 |
 
 ## 适合如何使用
 
@@ -490,3 +519,14 @@ EvoLoom 适合：
 - 扩展成带长期记忆和可复用经验沉淀的领域 Agent。
 
 如果只看一个核心点：EvoLoom 是一个会把稳定用户反馈沉淀成 Skills 的 **自进化 Harness Agent**。
+
+## 参与和安全
+
+- 提交代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 安全问题不要创建公开 Issue，请按 [SECURITY.md](SECURITY.md) 私下报告。
+- 变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+- 第三方组件和字体许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+
+## License
+
+EvoLoom 使用 [MIT License](LICENSE)。第三方组件仍受各自许可证约束。

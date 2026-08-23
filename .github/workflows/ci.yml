@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -18,9 +21,30 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
       - run: uv sync --extra dev --frozen
-      - run: uv run ruff check agents tests scripts
+      - run: uv run ruff check agents benchmarks tests scripts
       - run: uv run pytest --cov=agents --cov-report=term-missing --cov-report=xml --cov-fail-under=15
       - run: uv run python scripts/quality_report.py --check
+
+  public-gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check scripts/public-gateway.mjs
+      - run: node --test tests/test_public_gateway.mjs
+      - run: bash -n scripts/cloudrun-entrypoint.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   container:
     runs-on: ubuntu-latest
@@ -32,3 +56,9 @@ jobs:
           context: .
           push: false
           tags: evoloom:ci
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.cloudrun
+          push: false
+          tags: evoloom-cloudrun:ci

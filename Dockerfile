@@ -12,7 +12,8 @@ RUN apt-get update \
     && useradd --create-home --uid 10001 --shell /bin/bash evoloom
 
 WORKDIR /app
-COPY requirements.lock.txt pyproject.toml README.md ./
+COPY requirements.lock.txt pyproject.toml README.md LICENSE THIRD_PARTY_NOTICES.md ./
+COPY LICENSES ./LICENSES
 RUN pip install --no-cache-dir -r requirements.lock.txt
 
 COPY agents ./agents
