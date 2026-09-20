@@ -2,7 +2,7 @@
 
 # Agent Canvas v1.15.0, pinned to OpenHands commit ab23be62. The archive
 # checksum makes the UI build fail closed if the upstream snapshot changes.
-FROM node:24-slim AS evoloom-ui
+FROM node:25-slim AS evoloom-ui
 WORKDIR /build
 ADD https://codeload.github.com/OpenHands/OpenHands/tar.gz/ab23be62ad724fe83483036a0900bed7b7859166 \
   /tmp/agent-canvas.tar.gz
