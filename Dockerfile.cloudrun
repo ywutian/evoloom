@@ -19,7 +19,7 @@ ENV VITE_BASE_PATH=${VITE_BASE_PATH}
 ENV VITE_DO_NOT_TRACK=1
 RUN npm run build
 
-FROM ghcr.io/openhands/agent-canvas:1.15.0
+FROM ghcr.io/openhands/agent-canvas:1.20.0
 
 USER root
 WORKDIR /opt/evoloom
